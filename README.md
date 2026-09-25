@@ -2,25 +2,39 @@
 
 [Open the live TALOS app](https://talos-app.streamlit.app/)
 
-TALOS is a Python data inspection tool built around a simple idea: **a watchful guardian should inspect data before it is trusted.** Inspired by the bronze automaton guardian of Greek mythology, TALOS stands between messy source data and reliable analysis.
+TALOS is a Python data inspection tool built around a simple idea: **a watchful guardian should inspect data before it is trusted.** Inspired by the bronze automaton of Greek mythology, TALOS stands between messy source data and reliable analysis.
 
-It accepts a CSV, describes its structure, surfaces quality signals, and explains a custom integrity score. TALOS reports what may deserve attention. It does not silently alter the uploaded data.
+It profiles an uploaded CSV, explains quality signals, proposes possible repairs, and prepares a separate working copy only when the user approves. The original uploaded DataFrame remains untouched.
 
-## What TALOS inspects
+## What TALOS does
 
-- **Dataset profile:** file name and size, row and column counts, broad column types, column dtypes, and a ten-row preview.
-- **Missing values:** counts, percentages, severity bands, and short explanations of possible effects.
-- **Duplicate records:** exact repeated rows and name-based possible identifier fields, with repeats reported separately.
-- **Category consistency:** case and whitespace variants in suitable text columns. Likely names, free text, and very high-cardinality fields are skipped.
-- **Numeric outliers:** values outside the IQR bounds (`Q1 − 1.5 × IQR` and `Q3 + 1.5 × IQR`) for numeric fields that meet minimum sample and variation thresholds.
-- **Structural signals:** empty or constant columns, high-cardinality text, possible identifier patterns, and negative or zero-heavy numeric fields.
-- **Dataset Integrity Score:** a visible weighted summary of five checks, with the contribution and weight of each component shown.
+- Profiles file details, dataset dimensions, broad column types, and a ten-row preview.
+- Inspects missing values, exact duplicate rows, category variants, IQR outliers, structural signals, and possible identifiers.
+- Calculates a transparent, custom Dataset Integrity Score.
+- Offers user-controlled transformations in **The Forge**, previews them, and records approved changes in a session-only **Transformation Ledger**.
+- Exports the working copy as CSV, the transformation ledger as CSV, and a self-contained **TALOS Inspection Report** as HTML.
 
-These are review signals, not automatic proof that a value is wrong. For example, a repeated record, an outlier, or a negative number may be valid in its context. TALOS does not fill missing values, remove duplicates, standardize categories, or otherwise change the uploaded DataFrame.
+Signals are not proof that data is wrong. Repeated records, outliers, negative values, and constant fields can be valid in context. TALOS does not automatically modify data or infer business meaning.
+
+## The Forge and data-state model
+
+The app keeps four distinct pieces of state:
+
+```text
+uploaded CSV → original_df → findings and suggestions
+                         ↘ working_df → approved transformations → ledger
+```
+
+- `original_df` is kept as the source for comparison and reset.
+- `working_df` begins as a deep copy and is replaced only after the user previews and approves a transformation.
+- Findings are recalculated for the current working copy; the original inspection remains separately available.
+- The Transformation Ledger records each approved action and its parameters and examples. Reset restores a fresh copy of `original_df` and clears the ledger.
+
+Supported actions include whitespace normalization, choosing a canonical form for detected category variants, exact duplicate-row removal, user-selected missing-value handling, and removal of completely empty columns. TALOS leaves outliers, identifier repeats, high-cardinality text, and other context-dependent signals alone.
 
 ## Dataset Integrity Score
 
-The score is a **custom illustrative TALOS heuristic**, not an industry standard, certification, or guarantee that a dataset is correct. It ranges from 0 to 100 and is made from these weighted components:
+The score is a **custom illustrative TALOS heuristic**, not an industry standard or a guarantee that data is correct. It ranges from 0 to 100 with these weights:
 
 | Component | Weight |
 | --- | ---: |
@@ -30,9 +44,7 @@ The score is a **custom illustrative TALOS heuristic**, not an industry standard
 | Structural health | 20% |
 | IQR outlier signal | 15% |
 
-Each component is calculated directly from the findings and limited to the 0–100 range. The overall score is the rounded weighted average. A dataset without rows or columns is marked **Not assessable**. The component calculations, score bands, exclusions, and limitations are documented in [the scoring methodology](docs/scoring_methodology.md).
-
-The score intentionally excludes possible identifier repeats, high-cardinality text, negative values, and zero-heavy fields. Their meaning depends on the dataset and cannot be established from a CSV alone.
+The completeness component combines the missing-cell percentage and the share of columns with any missing values, so gaps distributed across many fields are visible in the score. The app shows every component and weight. See [the scoring methodology](docs/scoring_methodology.md) for formulas, bands, exclusions, and limitations.
 
 ## Run TALOS locally
 
@@ -53,7 +65,7 @@ python -m pytest -q
 
 ## Data handling
 
-Uploaded CSV bytes are read in memory for the Streamlit session and are not intentionally saved by TALOS. Do not upload confidential, sensitive, or personally identifiable information.
+CSV bytes, the original DataFrame, working copy, report, and ledger are processed in the Streamlit session. TALOS does not intentionally save them to persistent storage. Do not upload confidential, sensitive, or personally identifiable information.
 
 ## Project structure
 
@@ -62,26 +74,25 @@ TALOS/
 ├── app.py                         # Streamlit layout and interaction
 ├── .streamlit/config.toml         # Dark application theme
 ├── assets/
-│   ├── talos.css                  # Restrained TALOS interface styling
+│   ├── talos-emblem.svg           # Original guardian insignia
+│   ├── talos.css                  # TALOS interface styling
 │   └── screenshots/
-├── data/sample/                   # Reserved for future sample data
+├── data/sample/                   # Reserved for future showcase data
 ├── docs/
-│   └── scoring_methodology.md     # Score calculations and limitations
+│   └── scoring_methodology.md     # Score calculations and limits
 ├── src/
 │   ├── profiler.py                # CSV loading and structural profile
 │   ├── quality_checks.py          # Read-only data-quality checks
-│   └── scoring.py                 # Weighted, explainable score
-└── tests/                         # Automated checks for profile, findings, and score
+│   ├── scoring.py                 # Weighted, explainable score
+│   ├── transformations.py         # Copy-returning working-copy operations
+│   └── reporting.py               # CSV exports and HTML inspection report
+└── tests/                         # Profiling, checks, transformations, and reports
 ```
 
-The interface stays in `app.py`; reusable profiling, inspection, and scoring logic lives in `src/`. The implementation uses pandas and straightforward Python rather than third-party profiling frameworks.
+The interface stays in `app.py`; reusable profiling, inspection, transformation, scoring, and report logic lives in `src/`. The implementation uses pandas and straightforward Python rather than third-party profiling frameworks.
 
 ## Current status
 
-Stages 1 through 8 are implemented: project setup, CSV intake and profiling, missing-value inspection, duplicate and identifier checks, category consistency, IQR outlier checks, structural signals, and the explainable Dataset Integrity Score. Automated tests cover these features, including edge cases and checks that the input data is not modified.
+Stages 1–11 are implemented: infrastructure, CSV intake and profiling, quality checks, an explainable score, user-approved working-copy transformations, CSV exports, and the HTML Inspection Report. Stage 12 demo mode and Stage 13 final product polish remain future work.
 
-Future work may include user-defined validation rules and reports. Cleaning, transformed downloads, and report generation have not been implemented.
-
-## Project approach
-
-TALOS is built as an entry-to-mid-level Python portfolio project. The priority is clear pandas logic, small functions, descriptive names, direct tests, and methods that can be explained in an interview. Checks remain visible and conservative: when context is missing, TALOS reports a signal and leaves the decision to the analyst.
+TALOS is an entry-to-mid-level Python portfolio project. The priority is readable pandas logic, explicit functions, tests, and methods that can be explained in an interview. The Forge proposes; the user decides.
