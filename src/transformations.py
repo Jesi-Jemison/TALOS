@@ -282,11 +282,16 @@ def build_repair_plan(
         "fill_numeric_missing",
         "fill_text_missing",
     }
-    affected_columns = list(
-        dict.fromkeys(
-            str(action.get("column") or "All columns") for action in actions
-        )
-    )
+    affected_column_names: list[str] = []
+    for action in actions:
+        if action.get("type") == "normalize_text":
+            text_columns = action.get("plan", {}).get("selected_columns", [])
+            affected_column_names.extend(
+                str(column) for column in text_columns
+            )
+        else:
+            affected_column_names.append(str(action.get("column") or "All columns"))
+    affected_columns = list(dict.fromkeys(affected_column_names))
     return {
         "selected_count": len(actions),
         "affected_columns": affected_columns,

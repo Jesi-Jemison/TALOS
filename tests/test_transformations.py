@@ -399,6 +399,19 @@ def test_repair_plan_applies_only_selected_actions_and_estimates_scope():
     pd.testing.assert_frame_equal(original, source_copy)
 
 
+def test_repair_plan_reports_only_selected_text_columns():
+    original = pd.DataFrame({"status": ["open", "OPEN"], "notes": ["leave", "alone"]})
+    text_plan = build_text_normalisation_plan(original, "lowercase", ["status"])
+
+    plan = build_repair_plan(
+        original,
+        [{"type": "normalize_text", "label": "Text normalisation", "plan": text_plan}],
+    )
+
+    assert plan["affected_columns"] == ["status"]
+    assert plan["estimated_values_changed"] == 1
+
+
 def test_batch_failure_returns_no_partial_frame_and_keeps_source_untouched():
     original = pd.DataFrame({"amount": [1.0, None], "text": ["kept", None]})
     source_copy = original.copy(deep=True)
