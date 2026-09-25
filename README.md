@@ -2,7 +2,7 @@
 
 **Raw data enters. Nothing passes unchecked.**
 
-**Current release: v1.1.1 — Streamlit Forge controls and report polish.**
+**Current release: v1.1.1 — Streamlit Forge controls, report polish, and product voice refinement.**
 
 This patch follows the repository's existing v1.1.0 release. The supplied
 brief labels this work v1.0.3; the version stays monotonic with the code
@@ -24,13 +24,13 @@ Screenshots use the built-in synthetic demo data.
 
 ![TALOS first-run upload screen and workflow guide](assets/screenshots/talos-landing-20260925.jpg)
 
-![TALOS synthetic dataset profile and column structure](assets/screenshots/talos-demo-overview-20260925.jpg)
+![TALOS synthetic demo with its Dataset Integrity Score and Guardian Summary](assets/screenshots/talos-demo-overview-20260925.jpg)
 
 ![TALOS Dataset Integrity Score with component weights and limitations](assets/screenshots/talos-demo-score-20260925.jpg)
 
-![Per-column IQR treatment and manual field removal in one unapproved Repair Plan](assets/screenshots/talos-demo-forge-20260925.jpg)
+![Repair Plan with selected changes, expected dataset shape, and review before approval](assets/screenshots/talos-demo-forge-20260925.jpg)
 
-![Manual field selection with the identifier warning and expected shape](assets/screenshots/talos-demo-column-removal-20260925.jpg)
+![Manual column-removal control with all fields available and none selected by default](assets/screenshots/talos-demo-column-removal-20260925.jpg)
 
 ![Approved changes recorded in the ledger after reinspection](assets/screenshots/talos-demo-reinspection-20260925.jpg)
 
@@ -197,6 +197,7 @@ TALOS reads CSV files only. Its rules do not infer business context, enforce a s
 
 The Streamlit product and the separately released Python/CLI interfaces are
 implemented. This v1.1.1 update adds per-column outlier remediation, manual
-column removal, clearer light-mode surfaces, and a concise PDF report. TALOS
-remains a review-first workflow and does not infer business meaning or certify
-that a dataset is ready for analysis.
+column removal, clearer light-mode surfaces, a concise PDF report, and
+consistent product copy across the app and reports. TALOS remains a
+review-first workflow and does not infer business meaning or certify that a
+dataset is ready for analysis.
