@@ -22,6 +22,10 @@ Screenshots use the built-in synthetic demo data.
 | --- | --- |
 | ![Selected repair plan and working-copy comparison](assets/screenshots/talos-demo-forge-20260925.jpg) | ![Portable inspection evidence and report exports](assets/screenshots/talos-demo-evidence-20260925.jpg) |
 
+The appearance preference is session-level and leaves the inspection state intact.
+
+![TALOS light appearance with the source-file gate and workflow guide](assets/screenshots/talos-light-theme-20260925.jpg)
+
 ## What it does
 
 - Reads and profiles CSV files, then previews the source structure and records.
