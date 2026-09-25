@@ -127,8 +127,13 @@ def inspect_duplicates(df: pd.DataFrame) -> dict[str, object]:
     The returned sample DataFrame is a copy, so the source is never modified.
     """
     row_count = len(df.index)
-    duplicate_row_mask = df.duplicated(keep="first")
-    all_duplicate_rows_mask = df.duplicated(keep=False)
+    if df.shape[1]:
+        duplicate_row_mask = df.duplicated(keep="first")
+        all_duplicate_rows_mask = df.duplicated(keep=False)
+    else:
+        # Without columns, rows cannot be compared as records.
+        duplicate_row_mask = pd.Series(False, index=df.index)
+        all_duplicate_rows_mask = pd.Series(False, index=df.index)
     duplicate_row_count = int(duplicate_row_mask.sum())
     identifier_results = []
 
