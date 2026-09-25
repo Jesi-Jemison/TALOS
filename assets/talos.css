@@ -50,6 +50,38 @@
     pointer-events: none;
 }
 
+.talos-hero-layout {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+}
+
+.talos-hero-copy {
+    min-width: 0;
+}
+
+.talos-emblem-wrap {
+    display: grid;
+    width: clamp(5rem, 11vw, 7.5rem);
+    aspect-ratio: 1;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid rgba(185, 150, 104, 0.36);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(185, 150, 104, 0.10), rgba(17, 15, 21, 0.25) 68%);
+    box-shadow: inset 0 0 24px rgba(199, 184, 232, 0.05), 0 0 26px rgba(0, 0, 0, 0.25);
+}
+
+.talos-emblem {
+    display: block;
+    width: 82%;
+    height: 82%;
+    filter: drop-shadow(0 2px 7px rgba(185, 150, 104, 0.15));
+}
+
 .talos-eyebrow {
     margin: 0 0 0.55rem;
     color: var(--talos-bronze);
@@ -207,6 +239,12 @@
     letter-spacing: 0.04em;
 }
 
+.talos-ledger-count {
+    color: var(--talos-bronze);
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+}
+
 @media (max-width: 720px) {
     .block-container {
         padding-top: 1.2rem;
@@ -214,6 +252,20 @@
 
     .talos-hero {
         padding: 1.3rem;
+    }
+
+    .talos-hero-layout {
+        align-items: flex-start;
+        gap: 0.8rem;
+    }
+
+    .talos-emblem-wrap {
+        width: 4.5rem;
+    }
+
+    .talos-system-status {
+        max-width: 100%;
+        font-size: 0.65rem;
     }
 
     .talos-hero::after {
