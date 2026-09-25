@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title description">
+  <title id="title">TALOS guardian emblem</title>
+  <desc id="description">A bronze geometric shield with a single watchful lilac eye.</desc>
+  <defs>
+    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d1b184"/>
+      <stop offset="1" stop-color="#8d6945"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#302839"/>
+      <stop offset="1" stop-color="#121016"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 7 108 23v34c0 29-17 49-44 64C37 106 20 86 20 57V23L64 7Z"
+        fill="url(#plate)" stroke="url(#bronze)" stroke-width="3"/>
+  <path d="M64 17 98 29v28c0 22-12 38-34 51C42 95 30 79 30 57V29l34-12Z"
+        fill="none" stroke="#b99668" stroke-opacity=".42" stroke-width="1.5"/>
+  <path d="M38 53 50 41h28l12 12-12 12H50L38 53Z" fill="#17141d" stroke="#b99668" stroke-width="2"/>
+  <path d="M47 53c5-7 11-10 17-10s12 3 17 10c-5 7-11 10-17 10s-12-3-17-10Z" fill="#c7b8e8"/>
+  <circle cx="64" cy="53" r="6" fill="#17141d"/>
+  <circle cx="64" cy="53" r="2" fill="#f1edf5"/>
+  <path d="M51 76h26M55 83h18M59 90h10" stroke="#b99668" stroke-width="2" stroke-linecap="round" opacity=".8"/>
+  <path d="m25 30 8 3m70-3-8 3M26 61l7-1m69 1-7-1" stroke="#c7b8e8" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+</svg>
