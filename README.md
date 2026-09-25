@@ -28,15 +28,17 @@ Screenshots use the built-in synthetic demo data.
 
 ![TALOS Dataset Integrity Score with component weights and limitations](assets/screenshots/talos-demo-score-20260925.jpg)
 
-| The Forge | Reinspection |
-| --- | --- |
-| ![One category repair selected in the Repair Plan, awaiting approval](assets/screenshots/talos-demo-forge-20260925.jpg) | ![Approved repair recorded, then reinspected and compared with the original](assets/screenshots/talos-demo-reinspection-20260925.jpg) |
+![Per-column IQR treatment and manual field removal in one unapproved Repair Plan](assets/screenshots/talos-demo-forge-20260925.jpg)
+
+![Manual field selection with the identifier warning and expected shape](assets/screenshots/talos-demo-column-removal-20260925.jpg)
+
+![Approved changes recorded in the ledger after reinspection](assets/screenshots/talos-demo-reinspection-20260925.jpg)
 
 ![Evidence Vault with result-table summaries, report and ZIP exports](assets/screenshots/talos-demo-evidence-20260925.jpg)
 
 The appearance preference is session-level and leaves the inspection state intact.
 
-![TALOS light appearance with the source-file gate and workflow guide](assets/screenshots/talos-light-theme-20260925.jpg)
+![TALOS light appearance with a readable missing-data notice and table](assets/screenshots/talos-light-theme-20260925.jpg)
 
 ## What it does
 
