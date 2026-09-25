@@ -1,28 +1,26 @@
 # ⚙️ TALOS
 
-TALOS is a lightweight Python data quality checker designed to inspect datasets before they make their way into analysis.
+[Open the live TALOS app](https://talos-app.streamlit.app/)
 
-The project focuses on identifying common data-quality problems, explaining what they mean, and presenting the results in a clear, usable way.
+TALOS is a Python data profiling project designed to inspect a dataset before it makes its way into analysis. It is inspired by the bronze guardian of Greek mythology: a watchful system at the gate between source data and trusted work.
 
 > A guardian at the gate between messy data and trustworthy analysis.
 
 ---
 
-## 🎯 What TALOS will check
+## ✅ Currently implemented
 
-TALOS is being built to identify:
+Stage 2 provides CSV intake and structural profiling. Upload a CSV to see:
 
-- missing values
-- duplicate records
-- inconsistent categories
-- potential identifier issues
-- structural problems
-- numerical outliers
-- unusual or suspicious values
+- filename and readable file size
+- row and column counts
+- counts of numeric, text, boolean, and pandas-identified datetime columns
+- each column's name, pandas dtype, and broad TALOS type
+- a preview of the first 10 rows
 
-The goal is not to automatically “fix” data.
+TALOS reads uploaded file bytes in memory for the current Streamlit session and does not intentionally store them. Please do not upload confidential, sensitive, or personally identifiable information.
 
-TALOS highlights what deserves investigation so the person working with the dataset can decide what action is appropriate.
+TALOS does not yet assess whether values or records are correct. A date-like string, for example, stays classified as text unless pandas has already identified it as a datetime dtype.
 
 ---
 
@@ -58,18 +56,20 @@ TALOS is a portfolio project designed to explore that part of the analytical wor
 
 ## 🧩 Planned Workflow
 
+The later quality-checking stages are planned. They are not implemented in the current app.
+
 ```text
 CSV
  ↓
-Dataset Profile
+Dataset Profile  ← currently implemented
  ↓
-Quality Checks
+Quality Checks  ← planned
  ↓
-Issue Summary
+Issue Summary  ← planned
  ↓
-Dataset Integrity Score
+Dataset Integrity Score  ← planned
  ↓
-Interactive Report
+Interactive Report  ← planned
 ```
 
 ---
@@ -105,13 +105,11 @@ Sydney
 
 Use simple statistical methods such as the IQR method to identify values worth investigating.
 
-An outlier is not automatically an error.
-
-TALOS will identify unusual values without assuming they are incorrect.
+An outlier is not automatically an error. TALOS will identify unusual values without assuming they are incorrect.
 
 ### Structural Issues
 
-Look for things such as:
+Potential checks include:
 
 - completely empty columns
 - constant columns
@@ -120,43 +118,17 @@ Look for things such as:
 
 ---
 
-## 📊 Dataset Integrity Score
+## 📊 Planned Dataset Integrity Score
 
-TALOS will include a custom Dataset Integrity Score designed to summarise the severity of detected issues.
+TALOS may include a custom Dataset Integrity Score designed to summarise the severity of detected issues.
 
-The score will be:
-
-- transparent
-- deterministic
-- documented
-- explainable
-
-It will be an illustrative project metric rather than an industry-standard data quality measure.
+If implemented, the score will be transparent, deterministic, documented, and explainable. It will be an illustrative project metric rather than an industry-standard data quality measure.
 
 ---
 
-## 👹 Demo Dataset
+## 👹 Planned Demo Dataset
 
-TALOS will include a deliberately messy fictional dataset so the application can be tested without requiring users to upload their own data.
-
-The demo dataset will contain examples of:
-
-- missing data
-- duplicates
-- inconsistent categories
-- suspicious values
-- outliers
-- structural problems
-
----
-
-## 🔒 Data Handling
-
-TALOS is intended as a portfolio demonstration tool.
-
-Uploaded files will not be intentionally stored permanently.
-
-Users should not upload confidential, sensitive or personally identifiable information.
+A fictional sample dataset may be added so the later quality checks can be demonstrated without asking users to upload their own data. The sample folder is currently a placeholder.
 
 ---
 
@@ -164,28 +136,19 @@ Users should not upload confidential, sensitive or personally identifiable infor
 
 ```text
 TALOS/
-│
 ├── app.py
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-│
 ├── src/
 │   ├── __init__.py
-│   ├── profiler.py
-│   ├── quality_checks.py
-│   ├── scoring.py
-│   └── visualisations.py
-│
+│   └── profiler.py
 ├── data/
 │   └── sample/
-│
 ├── tests/
-│
-├── assets/
-│   └── screenshots/
-│
-└── docs/
+│   └── test_profiler.py
+└── assets/
+    └── screenshots/
 ```
 
 The structure will grow gradually as functionality is added.
@@ -194,16 +157,11 @@ The structure will grow gradually as functionality is added.
 
 ## 🚧 Current Status
 
-TALOS is currently in development.
+**Stage 2 — Dataset Intake & Profiling**
 
-The first stage is focused on:
+The app accepts CSV files, reports their basic structure and previews the first ten rows. Empty, malformed, or unreadable files receive a clear message instead of a traceback. Tests cover the loader, type classification, profile output, and file-size formatting.
 
-- establishing the repository structure
-- creating the Streamlit interface
-- enabling CSV uploads
-- confirming the application runs successfully
-
-Data-quality checks will be added incrementally after the basic application structure is working.
+Quality checks will be added incrementally in a later stage.
 
 ---
 
@@ -211,15 +169,17 @@ Data-quality checks will be added incrementally after the basic application stru
 
 Potential later additions include:
 
+- missing-value, duplicate, category-consistency, structural, and outlier checks
+- an explainable Dataset Integrity Score
+- a fictional demo dataset
 - Excel support
 - downloadable reports
-- downloadable cleaned datasets
 - configurable validation rules
 - database connections
 - schema validation
 - expanded visualisations
 
-These are deliberately outside the first version so the project remains understandable and maintainable.
+These are deliberately outside Stage 2 so the project remains understandable and maintainable.
 
 ---
 
@@ -227,16 +187,6 @@ These are deliberately outside the first version so the project remains understa
 
 TALOS is intentionally being built with straightforward, readable Python.
 
-The priority is to create something that is:
+The priority is to create something that is useful, explainable, testable, maintainable, and easy to discuss in an interview.
 
-- useful
-- explainable
-- testable
-- maintainable
-- easy to discuss in an interview
-
-No unnecessary enterprise architecture.
-
-No cleverness for the sake of cleverness.
-
-Just clear Python doing useful things.
+No unnecessary enterprise architecture. No cleverness for the sake of cleverness. Just clear Python doing useful things.
