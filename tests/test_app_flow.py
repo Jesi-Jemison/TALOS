@@ -24,7 +24,7 @@ def test_landing_keeps_the_upload_demo_path_and_guardian_identity():
 
     assert not app.exception
     assert app.button(key="talos-load-demo").label == "Load TALOS demo dataset"
-    assert any(item.value == "The gate is open." for item in app.subheader)
+    assert any(item.value == "Present a source." for item in app.subheader)
     assert any(
         'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in item.value
         for item in app.markdown
@@ -59,8 +59,8 @@ central,,11,
         'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in element.value
         for element in app.markdown
     )
-    assert "👁️ Guardian Summary" in {item.value for item in app.subheader}
-    assert "🛡️ Dataset Integrity Score" in {item.value for item in app.subheader}
+    assert "Guardian Summary" in {item.value for item in app.subheader}
+    assert "Dataset Integrity Score" in {item.value for item in app.subheader}
     assert any("Source received" in item.value for item in app.markdown)
     assert any('class="talos-inspection-status"' in item.value for item in app.markdown)
     expander_labels = {item.label for item in app.get("expander")}
@@ -127,7 +127,7 @@ central,,11,
     ] > 0
     assert "north " in set(working["region"])
     assert app.session_state["talos_original_df"].equals(original)
-    assert any("finding group(s) remain visible" in item.value for item in app.warning)
+    assert any("signal group" in item.value and "on watch" in item.value for item in app.warning)
 
     app.button(key="reset-working-copy").click().run()
     app.button(key="confirm-reset").click().run()
@@ -290,7 +290,8 @@ def test_evidence_pack_is_created_on_demand_with_applicable_outputs():
         assert "talos_evidence_pack/working_missing_values.csv" not in members
         report = archive.read("talos_evidence_pack/inspection_report.html").decode("utf-8")
         assert "Report created" in report
-        assert "The original uploaded DataFrame was not mutated" in report
+        assert "The original uploaded dataset remains unchanged by TALOS" in report
+        assert "Source preserved · Repairs recorded · Nothing changed without approval" in report
 
 
 def test_empty_and_malformed_uploads_show_readable_feedback():
@@ -304,7 +305,7 @@ def test_empty_and_malformed_uploads_show_readable_feedback():
     )
     app.run()
     assert not app.exception
-    assert any("could not read" in alert.value.lower() for alert in app.error)
+    assert any("could not be read consistently" in alert.value.lower() for alert in app.error)
 
 
 def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
@@ -312,11 +313,11 @@ def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
     findings = inspect_dataset(demo)
     summary = {item["area"]: item for item in build_guardian_summary(findings)}
 
-    assert "3 fields contain missing values" in summary["Missing values"]["message"]
-    assert "review the matches before removal" in summary["Duplicates & identifiers"]["message"]
-    assert "7 category variant groups" in summary["Category consistency"]["message"]
-    assert "31 values fall" in summary["Numeric distribution"]["message"]
-    assert "cannot determine their intended role" in summary["Structure"]["message"]
+    assert "Gaps detected across 3 columns" in summary["Missing values"]["message"]
+    assert "exact duplicate row was found" in summary["Duplicates & identifiers"]["message"]
+    assert "7 category groups are wearing more than one label" in summary["Category consistency"]["message"]
+    assert "31 numeric values sit beyond the IQR watchline" in summary["Numeric distribution"]["message"]
+    assert "caught the watch" in summary["Structure"]["message"]
     assert summary["Missing values"]["status"] == "Significant finding"
     assert summary["Duplicates & identifiers"]["status"] == "Review recommended"
     assert summary["Numeric distribution"]["status"] == "Observation"

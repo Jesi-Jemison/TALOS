@@ -133,14 +133,14 @@ def test_same_missing_cell_rate_scores_lower_when_spread_across_more_columns():
     [
         (100, "Clear"),
         (90, "Clear"),
-        (89, "Minor observations"),
-        (75, "Minor observations"),
-        (74, "Review recommended"),
-        (50, "Review recommended"),
-        (49, "Significant issues"),
-        (25, "Significant issues"),
-        (24, "Integrity compromised"),
-        (0, "Integrity compromised"),
+        (89, "Light Watch"),
+        (75, "Light Watch"),
+        (74, "Review Recommended"),
+        (50, "Review Recommended"),
+        (49, "Guarded"),
+        (25, "Guarded"),
+        (24, "High Alert"),
+        (0, "High Alert"),
     ],
 )
 def test_score_band_boundaries(score, expected):

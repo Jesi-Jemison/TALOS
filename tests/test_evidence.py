@@ -202,7 +202,7 @@ def test_evidence_pack_contains_readme_and_only_supplied_files():
             "talos_evidence_pack/inspection_report.html",
             "talos_evidence_pack/structure.csv",
         ]
-        assert "The uploaded source was preserved" in archive.read(
+        assert "The source remains sealed" in archive.read(
             "talos_evidence_pack/README.txt"
         ).decode("utf-8")
 

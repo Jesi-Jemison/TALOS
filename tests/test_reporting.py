@@ -172,19 +172,20 @@ def test_html_report_contains_profile_findings_score_ledger_and_embedded_emblem(
         emblem_svg='<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>',
     )
 
-    assert "TALOS Inspection Report" in report
+    assert "TALOS" in report
+    assert "INSPECTION DOSSIER" in report
     assert "customer_data.csv" in report
     assert "Dataset Integrity Score" in report
-    assert "custom TALOS heuristic" in report
+    assert "A TALOS heuristic summarising the signals detected" in report
     assert "Missing values" in report
     assert "Category variants" in report
     assert "Numeric outliers" in report
     assert "Remove empty column" in report
     assert "Before and after examples" in report
-    assert "Current working-copy inspection" in report
+    assert "Working Copy Reinspection" in report
     assert 'alt="TALOS bronze guardian emblem"' in report
     assert "data:image/svg+xml;base64," in report
-    assert "Original and working-copy comparison" in report
+    assert "Before / After the Forge" in report
     HTMLParser().feed(report)
     assert "table-layout: auto" in report
     assert "overflow-wrap: break-word" in report
@@ -203,7 +204,7 @@ def test_html_report_handles_no_transformations_and_escapes_uploaded_names():
         [],
     )
 
-    assert "No transformations were approved" in report
+    assert "No repairs were approved" in report
     assert "customer &lt;report&gt;.csv" in report
     assert "customer <report>.csv" not in report
     assert "The original uploaded dataset remains unchanged" in report
@@ -235,7 +236,7 @@ def test_html_report_includes_row_evidence_creation_note_and_escapes_cell_values
     assert "Flagged numeric values" in report
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in report
     assert "<script>alert(1)</script>" not in report
-    assert "Fewer findings do not automatically" in report
+    assert "Fewer signals mean fewer findings under TALOS's rules" in report
 
 
 def test_pdf_report_is_generated_as_a_printable_standalone_document():
@@ -331,13 +332,13 @@ def test_pdf_is_an_aggregate_report_with_dynamic_summary_repairs_and_guardian_he
     assert len(reader.pages) >= 2
     assert reader.pages[0].images
     assert "Inspection Summary" in text
-    assert "TALOS inspected 10 rows across 5 columns" in text
-    assert "user-approved transformation" in text
-    assert "Integrity Score changed from" in text
+    assert "10 rows entered inspection across 5 fields" in text
+    assert "approved changes were committed to the working copy" in text
+    assert "Integrity moved from" in text
     assert "Repairs Applied" in text
     assert "Remaining Signals" in text
-    assert "2 selected columns removed" in text
-    assert "1 sales IQR values replaced with non-outlier median" in text
+    assert "2 columns removed" in text
+    assert "1 outlier in sales was replaced using the non-outlier median" in text
     assert "Detailed Aggregate Findings" in text
     assert "Minor Observations" not in text
     assert "ROW-LEVEL-PRIVATE-MARKER" not in text
@@ -359,8 +360,8 @@ def test_pdf_without_repairs_says_the_working_copy_matches_the_source():
         created_at="2026-09-25T00:00:00+00:00",
     )
     text = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(BytesIO(pdf)).pages)
-    assert "No transformations were applied" in text
-    assert "working copy remains identical to the original source" in text
+    assert "No repairs were approved" in text
+    assert "working copy still matches the source" in text
 
 
 def test_pdf_ignores_large_row_level_evidence_tables():

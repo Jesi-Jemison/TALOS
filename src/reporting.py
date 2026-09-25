@@ -436,6 +436,97 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
     """
 
 
+def _report_signal_names(findings: dict[str, Any]) -> list[str]:
+    """List the signal groups used by the report's concise summary."""
+    signals: list[str] = []
+    if findings["missing"]["total_missing_cells"]:
+        signals.append("missing values")
+    if findings["duplicates"]["exact_duplicate_row_count"]:
+        signals.append("exact duplicate rows")
+    if findings["categories"]["inconsistent_group_count"]:
+        signals.append("category variants")
+    if findings["outliers"]["total_outlier_values"]:
+        signals.append("IQR outliers")
+    structure = findings["structure"]
+    if any(
+        structure.get(key)
+        for key in (
+            "empty_columns", "constant_columns", "high_cardinality_columns",
+            "identifier_columns", "numeric_patterns",
+        )
+    ):
+        signals.append("structural signals")
+    return signals
+
+
+def _approved_change_count(items: list[dict[str, Any]]) -> int:
+    """Count the selected changes represented by approved ledger entries."""
+    total = 0
+    for item in items:
+        parameters = item.get("parameters", {})
+        operation = parameters.get("operation", item.get("transformation_type", ""))
+        if operation == "remediate_outliers":
+            total += len(parameters.get("columns", [])) or 1
+        elif operation == "remove_columns":
+            total += int(parameters.get("columns_removed_count", 1))
+        elif operation == "normalize_text":
+            total += len(parameters.get("selected_columns", [])) or 1
+        else:
+            total += 1
+    return total
+
+
+def _score_summary_value(summary: dict[str, Any]) -> str:
+    """Format a score for narrative report copy."""
+    score = summary.get("score")
+    return "Not assessable" if score is None else f"{score} / 100"
+
+
+def _inspection_summary_copy(
+    profile: dict[str, Any],
+    original_findings: dict[str, Any],
+    working_findings: dict[str, Any],
+    original_summary: dict[str, Any],
+    working_summary: dict[str, Any],
+    ledger: list[dict[str, Any]],
+) -> str:
+    """Describe this inspection and its approved changes using live counts."""
+    row_count = int(original_summary.get("row_count", profile.get("row_count", 0)))
+    column_count = int(original_summary.get("column_count", profile.get("column_count", 0)))
+    if ledger:
+        change_count = _approved_change_count(ledger)
+        unresolved_count = len(_report_signal_names(working_findings))
+        change_noun = "change" if change_count == 1 else "changes"
+        change_verb = "was" if change_count == 1 else "were"
+        group_noun = "signal group" if unresolved_count == 1 else "signal groups"
+        group_verb = "remains" if unresolved_count == 1 else "remain"
+        remaining = (
+            f"{unresolved_count:,} {group_noun} {group_verb} at the gate."
+            if unresolved_count
+            else "No signal groups remain at the gate."
+        )
+        return (
+            f"{row_count:,} rows entered inspection across {column_count:,} fields. "
+            f"{change_count:,} approved {change_noun} {change_verb} committed to the working copy. "
+            f"Integrity moved from {_score_summary_value(original_summary)} to "
+            f"{_score_summary_value(working_summary)}. {remaining}"
+        )
+
+    signals = _report_signal_names(original_findings)
+    if signals:
+        names = ", ".join(signals[:3])
+        if len(signals) > 3:
+            names += f", and {len(signals) - 3} additional signal groups"
+        signal_sentence = f"The main review signals were {names}."
+    else:
+        signal_sentence = "No signal was raised by these checks."
+    return (
+        f"{row_count:,} rows entered inspection across {column_count:,} fields. "
+        f"The dataset scored {_score_summary_value(original_summary)}. {signal_sentence} "
+        "No repairs were approved; the working copy still matches the source."
+    )
+
+
 def build_inspection_report_html(
     profile: dict[str, Any],
     original_findings: dict[str, Any],
@@ -495,7 +586,7 @@ def build_inspection_report_html(
             'transformation-ledger',
         )
     else:
-        ledger_section = "<p>No transformations were approved. The working copy matches the original.</p>"
+        ledger_section = "<p>No repairs were approved. The working copy still matches the source.</p>"
 
     original_score = original_summary.get("score")
     current_score = working_summary.get("score")
@@ -537,9 +628,7 @@ def build_inspection_report_html(
         _score_rows(original_findings),
         "integrity-score",
     )
-    original_inspection = _findings_sections(
-        original_findings, "Original dataset inspection"
-    )
+    original_inspection = _findings_sections(original_findings, "Source Inspection")
     comparison_table = _render_table(
         ["Measure", "Original", "Working copy"], comparison_rows, "comparison"
     )
@@ -560,7 +649,7 @@ def build_inspection_report_html(
         <p class="note">A higher score means fewer signals under these checks. It does not establish suitability or correctness.</p>
         {working_score_table}
       </section>
-      {_findings_sections(working_findings, 'Current working-copy inspection')}
+      {_findings_sections(working_findings, 'Working Copy Reinspection')}
     """
 
     def render_row_evidence(
@@ -597,18 +686,23 @@ def build_inspection_report_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TALOS Inspection Report — {_escape(profile['file_name'])}</title>
+  <title>TALOS Inspection Dossier — {_escape(profile['file_name'])}</title>
   <style>{REPORT_STYLESHEET}</style>
 </head>
 <body><main class="page">
   <header>
-    <div><div class="eyebrow">Guardian protocol · Data inspection</div>
-      <h1>TALOS Inspection Report</h1>
+    <div><div class="eyebrow">GUARDIAN PROTOCOL · DATA INSPECTION</div>
+      <h1>TALOS</h1>
+      <p>INSPECTION DOSSIER</p>
       <p>Raw data enters. Nothing passes unchecked.</p>
     </div>
     {emblem_html}
   </header>
-  <section><h2>Source file</h2><div class="meta-grid">
+  <section><h2>Inspection Summary</h2>
+    <p>The watch is complete. This record contains what TALOS found, what you changed, and what remains unresolved.</p>
+    <p>{_escape(_inspection_summary_copy(profile, original_findings, working_findings, original_summary, working_summary, ledger))}</p>
+  </section>
+  <section><h2>Source</h2><div class="meta-grid">
     <div><span>Filename</span><strong>{_escape(profile['file_name'])}</strong></div>
     <div><span>File size</span><strong>{_escape(profile['file_size'])}</strong></div>
     <div><span>Rows</span><strong>{profile['row_count']}</strong></div>
@@ -621,15 +715,14 @@ def build_inspection_report_html(
     <div class="score">{_escape(score_text)}</div>
     <p class="note">{_escape(score_explanation)}</p>
     {original_score_table}
-    <p class="note">The Dataset Integrity Score is a custom TALOS heuristic and is not an industry-standard data quality measure.</p>
   </section>
   {original_inspection}
   {original_row_evidence}
   {working_sections}
   {working_row_evidence}
   <section>
-    <h2>Original and working-copy comparison</h2>
-    <p>Fewer findings do not automatically mean the dataset is more suitable for its intended use.</p>
+    <h2>Before / After the Forge</h2>
+    <p>Fewer signals mean fewer findings under TALOS's rules — not automatic proof of better data.</p>
     {comparison_table}
   </section>
   <section><h2>Transformation Ledger</h2>{ledger_section}</section>
@@ -639,7 +732,7 @@ def build_inspection_report_html(
     <li>Transformations are user-approved and applied to a separate working copy.</li>
     <li>The original uploaded dataset remains unchanged by TALOS.</li>
   </ul></section>
-  <footer>Generated by TALOS v1.1.1 · The original uploaded DataFrame was not mutated; approved changes belong to a separate working copy.</footer>
+  <footer>Source preserved · Repairs recorded · Nothing changed without approval</footer>
 </main></body></html>"""
 
 
@@ -690,7 +783,7 @@ def build_inspection_report_pdf(
         rightMargin=right_margin,
         topMargin=0,
         bottomMargin=bottom_margin,
-        title=f"TALOS Inspection Report — {profile.get('file_name', 'dataset.csv')}",
+        title=f"TALOS Inspection Dossier — {profile.get('file_name', 'dataset.csv')}",
         author="TALOS",
         pageCompression=1,
     )
@@ -720,7 +813,7 @@ def build_inspection_report_pdf(
         canvas.line(left_margin, 9 * mm, page_width - right_margin, 9 * mm)
         canvas.setFillColor(muted)
         canvas.setFont("Helvetica", 7)
-        canvas.drawString(left_margin, 5.5 * mm, "Original data preserved · Findings require contextual review")
+        canvas.drawString(left_margin, 5.5 * mm, "Source preserved · Repairs recorded · Nothing changed without approval")
         canvas.drawRightString(page_width - right_margin, 5.5 * mm, f"Page {document.page}")
         canvas.restoreState()
 
@@ -730,7 +823,7 @@ def build_inspection_report_pdf(
         canvas.rect(0, page_height - 9 * mm, page_width, 9 * mm, fill=1, stroke=0)
         canvas.setFillColor(colors.HexColor("#E1BF78"))
         canvas.setFont("Helvetica-Bold", 8)
-        canvas.drawString(left_margin, page_height - 6 * mm, "TALOS  ·  INSPECTION REPORT")
+        canvas.drawString(left_margin, page_height - 6 * mm, "TALOS  ·  INSPECTION DOSSIER")
         canvas.restoreState()
         draw_footer(canvas, document)
 
@@ -796,7 +889,7 @@ def build_inspection_report_pdf(
             [paragraph(value) for value in row[: len(headers)]] for row in rows
         )
         if not rows:
-            cells.append([paragraph("No findings recorded.", small_style)] + [""] * (len(headers) - 1))
+            cells.append([paragraph("No signal raised.", small_style)] + [""] * (len(headers) - 1))
         table = Table(
             cells,
             colWidths=widths or [available_width / max(1, len(headers))] * len(headers),
@@ -827,50 +920,13 @@ def build_inspection_report_pdf(
         score = findings["score"].get("score")
         return "Not assessable" if score is None else f"{score} / 100"
 
-    def signal_names(findings: dict[str, Any]) -> list[str]:
-        signals: list[str] = []
-        if findings["missing"]["total_missing_cells"]:
-            signals.append("missing values")
-        if findings["duplicates"]["exact_duplicate_row_count"]:
-            signals.append("exact duplicate rows")
-        if findings["categories"]["inconsistent_group_count"]:
-            signals.append("category variants")
-        if findings["outliers"]["total_outlier_values"]:
-            signals.append("IQR outliers")
-        structure = findings["structure"]
-        if any(
-            structure.get(key)
-            for key in (
-                "empty_columns", "constant_columns", "high_cardinality_columns",
-                "identifier_columns", "numeric_patterns",
-            )
-        ):
-            signals.append("structural signals")
-        return signals
-
-    def approved_change_count(items: list[dict[str, Any]]) -> int:
-        total = 0
-        for item in items:
-            parameters = item.get("parameters", {})
-            operation = parameters.get("operation", item.get("transformation_type", ""))
-            if operation == "remediate_outliers":
-                total += len(parameters.get("columns", [])) or 1
-            elif operation == "remove_columns":
-                total += int(parameters.get("columns_removed_count", 1))
-            elif operation == "normalize_text":
-                total += len(parameters.get("selected_columns", [])) or 1
-            else:
-                total += 1
-        return total
-
     def repair_summaries(items: list[dict[str, Any]]) -> list[str]:
         bullets: list[str] = []
         strategy_names = {
             "blank": "replaced with missing values",
-            "mean": "replaced with non-outlier mean",
-            "median": "replaced with non-outlier median",
-            "custom": "replaced with a custom value",
-            "remove_rows": "removed affected rows",
+            "mean": "replaced using the non-outlier mean",
+            "median": "replaced using the non-outlier median",
+            "custom": "replaced with the chosen value",
             "cap": "capped to the nearest IQR boundary",
         }
         for item in items:
@@ -878,15 +934,50 @@ def build_inspection_report_pdf(
             operation = parameters.get("operation", "")
             if operation == "remediate_outliers":
                 for column in parameters.get("columns", []):
-                    strategy = strategy_names.get(column.get("strategy"), column.get("strategy", "updated"))
-                    bullets.append(
-                        f"{column.get('outlier_count', 0):,} {column.get('column', 'field')} IQR values {strategy}"
-                    )
+                    count = int(column.get("outlier_count", 0))
+                    field = str(column.get("column", "field"))
+                    strategy_key = column.get("strategy")
+                    if strategy_key == "remove_rows":
+                        bullets.append(f"{count:,} rows removed for IQR outliers in {field}")
+                    else:
+                        strategy = strategy_names.get(strategy_key, strategy_key or "updated")
+                        noun = "outlier" if count == 1 else "outliers"
+                        verb = "was" if count == 1 else "were"
+                        bullets.append(f"{count:,} {noun} in {field} {verb} {strategy}")
             elif operation == "remove_columns":
                 count = int(parameters.get("columns_removed_count", 0))
                 names = ", ".join(map(str, parameters.get("columns_removed", [])[:4]))
                 suffix = f": {names}" if names else ""
-                bullets.append(f"{count:,} selected column{'s' if count != 1 else ''} removed{suffix}")
+                bullets.append(f"{count:,} column{'s' if count != 1 else ''} removed{suffix}")
+            elif operation == "remove_exact_duplicates":
+                count = int(item.get("affected_rows", 0))
+                bullets.append(f"{count:,} exact duplicate row{'s' if count != 1 else ''} removed")
+            elif operation == "consolidate_category":
+                field = str(item.get("column", "field"))
+                canonical = parameters.get("canonical_value")
+                suffix = f" to {canonical}" if canonical is not None else ""
+                bullets.append(
+                    f"Category variants in {field} normalised{suffix} ({int(item.get('affected_rows', 0)):,} rows changed)"
+                )
+            elif operation == "normalize_whitespace":
+                field = str(item.get("column", "field"))
+                bullets.append(
+                    f"Whitespace normalised in {field} ({int(item.get('affected_rows', 0)):,} rows changed)"
+                )
+            elif operation in {"fill_numeric_missing", "fill_text_missing"}:
+                field = str(item.get("column", "field"))
+                method = str(parameters.get("method", "chosen value"))
+                bullets.append(
+                    f"{int(item.get('affected_rows', 0)):,} missing values in {field} filled using {method}"
+                )
+            elif operation == "remove_rows_with_missing":
+                field = str(item.get("column", "field"))
+                bullets.append(
+                    f"{int(item.get('affected_rows', 0)):,} rows removed for missing values in {field}"
+                )
+            elif operation == "remove_empty_column":
+                field = str(item.get("column", "field"))
+                bullets.append(f"1 empty column removed: {field}")
             elif operation == "normalize_text":
                 count = int(parameters.get("affected_values", 0))
                 fields = ", ".join(map(str, parameters.get("selected_columns", [])[:4]))
@@ -901,36 +992,21 @@ def build_inspection_report_pdf(
                     bullets.append(f"{label}: {affected:,} rows")
         return bullets
 
-    source_signals = signal_names(original_findings)
-    if source_signals:
-        signal_text = ", ".join(source_signals[:3])
-        if len(source_signals) > 3:
-            signal_text += f", and {len(source_signals) - 3} additional signal group(s)"
-        signal_sentence = f"The main review signals were {signal_text}."
-    else:
-        signal_sentence = "No configured review signals were detected."
-
     rows_count = int(original_summary.get("row_count", profile.get("row_count", 0)))
     columns_count = int(original_summary.get("column_count", profile.get("column_count", 0)))
-    if ledger:
-        transformation_count = approved_change_count(ledger)
-        unresolved = len(signal_names(working_findings))
-        summary_text = (
-            f"TALOS inspected {rows_count:,} rows across {columns_count:,} columns. "
-            f"{transformation_count:,} user-approved transformation(s) were applied to the working copy. "
-            f"The Dataset Integrity Score changed from {score_text(original_findings)} to "
-            f"{score_text(working_findings)}. {unresolved:,} review signal group(s) remain."
-        )
-    else:
-        summary_text = (
-            f"TALOS inspected {rows_count:,} rows across {columns_count:,} columns. "
-            f"The dataset scored {score_text(original_findings)}. {signal_sentence} "
-            "No transformations were applied; the working copy remains identical to the original source."
-        )
+    summary_text = _inspection_summary_copy(
+        profile,
+        original_findings,
+        working_findings,
+        original_summary,
+        working_summary,
+        ledger,
+    )
 
     story: list[object] = []
     hero_left = Paragraph(
-        "TALOS INSPECTION REPORT<br/>"
+        "TALOS<br/>"
+        "<font size='10' color='#E8DEFF'>INSPECTION DOSSIER</font><br/>"
         "<font size='9' color='#E8DEFF'>Raw data enters. Nothing passes unchecked.</font><br/>"
         f"<font size='7' color='#E1BF78'>GUARDIAN ACTIVE · Source: {plain(profile.get('file_name', 'dataset.csv'))}</font>",
         title_style,
@@ -970,7 +1046,13 @@ def build_inspection_report_pdf(
     story.extend([hero, Spacer(1, 6), NextPageTemplate("Later")])
 
     story.append(Paragraph("Inspection Summary", section_style))
-    summary_box = Table([[paragraph(summary_text, body_style)]], colWidths=[available_width])
+    summary_box = Table(
+        [
+            [paragraph("The watch is complete. This record contains what TALOS found, what you changed, and what remains unresolved.", body_style)],
+            [paragraph(summary_text, body_style)],
+        ],
+        colWidths=[available_width],
+    )
     summary_box.setStyle(
         TableStyle(
             [
@@ -986,7 +1068,7 @@ def build_inspection_report_pdf(
     )
     story.append(summary_box)
 
-    story.append(Paragraph("Source Profile", section_style))
+    story.append(Paragraph("Source", section_style))
     source_rows = [
         ["Filename", profile.get("file_name", "")],
         ["File size", profile.get("file_size", "")],
@@ -996,7 +1078,7 @@ def build_inspection_report_pdf(
     ]
     story.append(data_table(["Profile item", "Value"], source_rows, widths=[available_width * .28, available_width * .72]))
 
-    story.append(Paragraph("Integrity Score", section_style))
+    story.append(Paragraph("Dataset Integrity Score", section_style))
     initial_score = score_text(original_findings)
     current_score = score_text(working_findings)
     score_panel = Table(
@@ -1018,7 +1100,7 @@ def build_inspection_report_pdf(
     )
     story.append(score_panel)
     story.append(Paragraph(
-        "The Dataset Integrity Score is a custom TALOS heuristic, not an industry standard or proof of suitability.",
+        "A TALOS heuristic summarising the signals detected in this inspection. It is not a verdict on whether the dataset is correct.",
         small_style,
     ))
 
@@ -1035,10 +1117,14 @@ def build_inspection_report_pdf(
         widths=[available_width * .43, available_width * .26, available_width * .31],
     ))
 
-    story.append(Paragraph("Transformations / Repairs Applied", section_style))
+    story.append(Paragraph("Repairs Applied", section_style))
     if ledger:
         bullets = repair_summaries(ledger)
-        story.append(Paragraph(f"{approved_change_count(ledger):,} approved transformations", body_style))
+        change_count = _approved_change_count(ledger)
+        story.append(Paragraph(
+            f"{change_count:,} approved change{'s' if change_count != 1 else ''} committed to the working copy.",
+            body_style,
+        ))
         for bullet in bullets[:10]:
             story.append(Paragraph("• " + plain(bullet), body_style))
         if len(bullets) > 10:
@@ -1047,7 +1133,7 @@ def build_inspection_report_pdf(
                 small_style,
             ))
     else:
-        story.append(Paragraph("No transformations were approved. The working copy matches the source.", body_style))
+        story.append(Paragraph("No repairs were approved. The working copy still matches the source.", body_style))
 
     remaining_rows = [
         ["Missing values", f"{working_summary.get('missing_cells', 0):,}"],
@@ -1061,9 +1147,9 @@ def build_inspection_report_pdf(
     if remaining_rows:
         story.append(data_table(["Current signal group", "Count"], remaining_rows))
     else:
-        story.append(Paragraph("No configured review signal groups remain in the working copy.", body_style))
+        story.append(Paragraph("No signal raised under TALOS's current rules.", body_style))
 
-    story.append(Paragraph("Before vs After", section_style))
+    story.append(Paragraph("Before / After the Forge", section_style))
     comparison_rows = [
         ["Rows", f"{original_summary.get('row_count', 0):,}", f"{working_summary.get('row_count', 0):,}"],
         ["Columns", f"{original_summary.get('column_count', 0):,}", f"{working_summary.get('column_count', 0):,}"],
@@ -1123,9 +1209,9 @@ def build_inspection_report_pdf(
 
     story.append(Paragraph("Limitations", section_style))
     for note in (
-        "Findings are contextual signals. TALOS does not understand the business meaning of a field.",
+        "Findings are contextual signals. TALOS cannot infer the business meaning of a field.",
         "An outlier is not automatically an error; possible identifiers are inferred from column names.",
-        "Transformations require user approval and affect a separate working copy. The original dataset remains unchanged.",
+        "Changes require user approval and affect a separate working copy. The source remains unchanged.",
     ):
         story.append(Paragraph("• " + plain(note), body_style))
 

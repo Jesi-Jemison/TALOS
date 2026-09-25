@@ -45,10 +45,10 @@ The missing-cell percentage captures how many values are absent overall. The aff
 | Score | TALOS label |
 | ---: | --- |
 | 90–100 | Clear |
-| 75–89 | Minor observations |
-| 50–74 | Review recommended |
-| 25–49 | Significant issues |
-| 0–24 | Integrity compromised |
+| 75–89 | Light Watch |
+| 50–74 | Review Recommended |
+| 25–49 | Guarded |
+| 0–24 | High Alert |
 
 These labels summarize the heuristic only. They do not replace domain rules, source-system knowledge, or human review.
 

@@ -18,16 +18,16 @@ def _bounded_percentage(value: float) -> float:
 
 
 def score_band(score: int) -> str:
-    """Return a short, documented label for an integer score from 0 to 100."""
+    """Return the documented display label for a score from 0 to 100."""
     if score >= 90:
         return "Clear"
     if score >= 75:
-        return "Minor observations"
+        return "Light Watch"
     if score >= 50:
-        return "Review recommended"
+        return "Review Recommended"
     if score >= 25:
-        return "Significant issues"
-    return "Integrity compromised"
+        return "Guarded"
+    return "High Alert"
 
 
 def calculate_integrity_score(
@@ -103,7 +103,7 @@ def calculate_integrity_score(
         "components": components,
         "weights": SCORE_WEIGHTS.copy(),
         "explanation": (
-            "A custom illustrative TALOS heuristic. It summarises the checks shown here; "
-            "it is not an industry standard or a verdict on whether data is correct."
+            "A TALOS heuristic summarising the signals detected in this inspection. "
+            "It is not a verdict on whether the dataset is correct."
         ),
     }
