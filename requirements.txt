@@ -1,5 +1,6 @@
-streamlit
-pandas
-numpy
+# TALOS v1.1.1 Streamlit runtime compatibility range.
+streamlit>=1.40,<2
+pandas>=2.2,<3
+numpy>=1.26,<3
 pytest
 reportlab>=4.2,<5

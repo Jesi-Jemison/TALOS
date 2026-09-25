@@ -28,3 +28,4 @@ published version sequence.
   and clarified the Guardian Summary statements.
 - Refreshed the README's local Streamlit setup and added versioned project
   release notes.
+- Bounded the Streamlit runtime to the pandas 2.x API used by this release.
