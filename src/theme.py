@@ -76,7 +76,8 @@ def theme_token_css(theme: str) -> str:
         for key, value in tokens.items()
         if key != "color-scheme"
     )
-    return ":root {\n    " + "\n    ".join(declarations) + "\n}"
+    selectors = ":root, body, [data-testid=\"stAppViewContainer\"], .stApp"
+    return selectors + " {\n    " + "\n    ".join(declarations) + "\n}"
 
 
 def theme_tokens(theme: str) -> dict[str, str]:

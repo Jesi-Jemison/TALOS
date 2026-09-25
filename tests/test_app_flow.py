@@ -46,6 +46,7 @@ central,,11,
 
     assert not app.exception
     assert app.session_state["talos_theme_preference"] == "Light"
+    assert any("--talos-bg: #F3EEE4" in item.value for item in app.markdown)
     assert any(
         'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in element.value
         for element in app.markdown

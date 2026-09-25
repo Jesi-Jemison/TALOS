@@ -33,6 +33,7 @@ def test_dark_is_default_and_themes_share_one_complete_token_shape():
     assert "--talos-bg" in theme_token_css("Dark")
     assert "--text-color: var(--talos-text)" in theme_token_css("Light")
     assert "color-scheme: light" in theme_token_css("Light")
+    assert 'body, [data-testid="stAppViewContainer"], .stApp' in theme_token_css("Light")
 
 
 def test_body_and_muted_text_meet_readable_contrast_in_both_themes():

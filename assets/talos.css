@@ -19,8 +19,8 @@
 }
 
 html, body, [data-testid="stAppViewContainer"], .stApp {
-    background-color: var(--talos-bg);
-    color: var(--talos-text);
+    background-color: var(--talos-bg) !important;
+    color: var(--talos-text) !important;
 }
 
 body, .stApp {
