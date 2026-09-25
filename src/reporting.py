@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import PurePosixPath
 from typing import Any
@@ -29,51 +30,54 @@ TRANSFORMATION_LOG_COLUMNS = [
 REPORT_STYLESHEET = """
 :root {
   color-scheme: light;
-  --ink: #211c27;
-  --muted: #665f6e;
-  --bronze: #9b7549;
-  --plum: #51445f;
-  --line: #ddd7e2;
+  --ink: #322417;
+  --muted: #534638;
+  --bronze: #896337;
+  --plum: #49365A;
+  --line: #B7A98F;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: #f4f1f5;
+  background: #F3EEE4;
   color: var(--ink);
   font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif;
 }
-.page { max-width: 1100px; margin: 0 auto; padding: 28px; }
+.page { max-width: 1180px; margin: 0 auto; padding: 28px; }
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 32px;
-  border-top: 4px solid var(--bronze);
+  padding: 30px 34px;
+  border: 1px solid #896337;
+  border-top: 4px solid #C39A5A;
   border-radius: 14px;
-  background: #17141d;
-  color: #f4eff8;
+  background: #111017;
+  box-shadow: inset 0 0 0 4px rgba(195, 154, 90, .11);
+  color: #E8DEFF;
 }
-.eyebrow { color: #c7b8e8; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; }
+.eyebrow { color: #BDA8F2; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; }
 h1 { margin: 6px 0; font-size: 34px; }
-header p { margin: 0; color: #c6bfce; }
+header p { margin: 0; color: #C4BED0; }
 .emblem { width: 92px; height: 92px; }
 .emblem-fallback {
   display: grid;
   width: 72px;
   height: 72px;
   place-items: center;
-  border: 2px solid var(--bronze);
+  border: 2px solid #C39A5A;
   border-radius: 50%;
-  color: var(--bronze);
+  color: #C39A5A;
   font-size: 38px;
 }
 section {
   margin-top: 22px;
   padding: 24px;
   border: 1px solid var(--line);
+  border-top: 2px solid #B7A98F;
   border-radius: 12px;
-  background: #fff;
+  background: #FBF8F1;
   break-inside: avoid;
 }
 h2 { margin: 0 0 14px; color: var(--plum); font-size: 22px; }
@@ -88,11 +92,12 @@ h3 { margin: 22px 0 8px; font-size: 16px; }
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fbf9fc;
+  background: #F6F1E8;
 }
 .meta-grid span, .summary-grid span { display: block; color: var(--muted); font-size: 12px; }
 .meta-grid strong, .summary-grid strong { display: block; margin-top: 4px; font-size: 18px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-scroll { width: 100%; overflow-x: auto; }
 th, td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
@@ -100,12 +105,12 @@ th, td {
   vertical-align: top;
   overflow-wrap: anywhere;
 }
-th { color: var(--plum); background: #f5f1f7; }
+th { color: var(--plum); background: #E8E0D1; }
 .empty-row { color: var(--muted); text-align: center; }
 .score {
   padding: 14px 18px;
   border-left: 3px solid var(--bronze);
-  background: #f7f3ed;
+  background: #EFE7DA;
   font-size: 22px;
   font-weight: 650;
 }
@@ -115,6 +120,13 @@ footer { padding: 18px 4px; font-size: 12px; }
   body { background: #fff; }
   .page { max-width: none; padding: 0; }
   section { box-shadow: none; }
+  header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+@media (max-width: 700px) {
+  .page { padding: 14px; }
+  header { padding: 20px; }
+  h1 { font-size: 27px; }
+  section { padding: 17px; }
 }
 """
 
@@ -129,6 +141,17 @@ def build_export_filename(original_filename: str, export_type: str) -> str:
         "cleaned": "cleaned.csv",
         "transformations": "transformations.csv",
         "report": "report.html",
+        "structure": "structure.csv",
+        "missing": "missing_values.csv",
+        "duplicates": "duplicate_rows.csv",
+        "identifiers": "identifier_findings.csv",
+        "categories": "category_variants.csv",
+        "outliers": "outliers.csv",
+        "structural": "structural_findings.csv",
+        "score": "integrity_score.csv",
+        "score_comparison": "score_comparison.csv",
+        "comparison": "comparison.csv",
+        "evidence_pack": "evidence_pack.zip",
     }
     if export_type not in suffixes:
         raise ValueError(f"Unsupported export type: {export_type!r}.")
@@ -204,6 +227,32 @@ def _score_rows(findings: dict[str, Any]) -> list[list[object]]:
     ]
 
 
+def _render_evidence_table(
+    heading: str, table: pd.DataFrame | None, row_limit: int = 500
+) -> str:
+    """Render escaped row-level evidence, limiting very large HTML sections."""
+    if table is None or table.empty:
+        return ""
+    shown = table.head(row_limit)
+    table_html = shown.to_html(
+        index=False,
+        escape=True,
+        border=0,
+        classes=["evidence-table"],
+        na_rep="",
+    )
+    note = ""
+    if len(table.index) > row_limit:
+        note = (
+            f'<p class="note">Showing the first {row_limit:,} of {len(table.index):,} rows. '
+            "The evidence pack includes the complete CSV table.</p>"
+        )
+    return (
+        f'<h3>{_escape(heading)}</h3><div class="table-scroll">'
+        f"{table_html}</div>{note}"
+    )
+
+
 def _findings_sections(findings: dict[str, Any], heading: str) -> str:
     """Render the inspection summaries without embedding source-data rows."""
     missing = findings["missing"]
@@ -217,7 +266,6 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
             item["explanation"],
         ]
         for item in missing["columns"]
-        if item["missing_count"]
     ]
 
     duplicates = findings["duplicates"]
@@ -247,6 +295,9 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
             item["column"],
             item["outlier_count"],
             f"{item['outlier_percentage']:.1f}%",
+            f"{item['q1']:.3g}",
+            f"{item['median']:.3g}",
+            f"{item['q3']:.3g}",
             f"{item['lower_bound']:.3g}",
             f"{item['upper_bound']:.3g}",
         ]
@@ -303,7 +354,7 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
       {_render_table(['Column', 'Normalized form', 'Observed values'], category_rows)}
       <h3>Numeric outliers</h3>
       {_render_table(
-          ['Column', 'Outliers', 'Outlier %', 'Lower IQR bound', 'Upper IQR bound'],
+          ['Column', 'Outliers', 'Outlier %', 'Q1', 'Median', 'Q3', 'Lower IQR bound', 'Upper IQR bound'],
           outlier_rows,
       )}
       <h3>Structural and numeric signals</h3>
@@ -320,8 +371,12 @@ def build_inspection_report_html(
     working_summary: dict[str, Any],
     ledger: list[dict[str, Any]],
     emblem_svg: str = "",
+    original_evidence_tables: dict[str, pd.DataFrame] | None = None,
+    working_evidence_tables: dict[str, pd.DataFrame] | None = None,
+    created_at: str | None = None,
 ) -> str:
     """Build a self-contained, escaped, printable HTML report."""
+    created_at = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     score = original_findings["score"]
     score_text = (
         "Not assessable"
@@ -380,6 +435,21 @@ def build_inspection_report_html(
             working_summary["duplicate_rows"],
         ],
         [
+            "Category variant groups",
+            original_summary.get("category_variant_groups", 0),
+            working_summary.get("category_variant_groups", 0),
+        ],
+        [
+            "IQR outlier values",
+            original_summary.get("outlier_values", 0),
+            working_summary.get("outlier_values", 0),
+        ],
+        [
+            "Empty columns",
+            original_summary.get("empty_columns", 0),
+            working_summary.get("empty_columns", 0),
+        ],
+        [
             "Integrity score",
             original_score if original_score is not None else "Not assessable",
             current_score if current_score is not None else "Not assessable",
@@ -398,25 +468,53 @@ def build_inspection_report_html(
     comparison_table = _render_table(
         ["Measure", "Original", "Working copy"], comparison_rows
     )
-    working_sections = ""
-    if ledger:
-        working_score = working_findings["score"]
-        working_score_text = (
-            "Not assessable"
-            if working_score["score"] is None
-            else f"{working_score['score']} / 100 · {working_score['band']}"
+    working_score = working_findings["score"]
+    working_score_text = (
+        "Not assessable"
+        if working_score["score"] is None
+        else f"{working_score['score']} / 100 · {working_score['band']}"
+    )
+    working_score_table = _render_table(
+        ["Component", "Weight", "Component score", "Weighted points"],
+        _score_rows(working_findings),
+    )
+    working_sections = f"""
+      <section><h2>Current working-copy integrity score</h2>
+        <div class="score">{_escape(working_score_text)}</div>
+        <p class="note">A higher score means fewer signals under these checks. It does not establish suitability or correctness.</p>
+        {working_score_table}
+      </section>
+      {_findings_sections(working_findings, 'Current working-copy inspection')}
+    """
+
+    def render_row_evidence(
+        tables: dict[str, pd.DataFrame] | None, label: str
+    ) -> str:
+        if not tables:
+            return ""
+        sections = []
+        table_labels = {
+            "duplicate_rows.csv": "Exact duplicate records",
+            "outliers.csv": "Flagged numeric values",
+        }
+        for filename, title in table_labels.items():
+            rendered = _render_evidence_table(title, tables.get(filename))
+            if rendered:
+                sections.append(rendered)
+        if not sections:
+            return ""
+        return (
+            f"<section><h2>{_escape(label)} row-level evidence</h2>"
+            + "".join(sections)
+            + "</section>"
         )
-        working_score_table = _render_table(
-            ["Component", "Weight", "Component score", "Weighted points"],
-            _score_rows(working_findings),
-        )
-        working_sections = f"""
-        <section><h2>Current working-copy integrity score</h2>
-          <div class="score">{_escape(working_score_text)}</div>
-          {working_score_table}
-        </section>
-        {_findings_sections(working_findings, 'Current working-copy inspection')}
-        """
+
+    original_row_evidence = render_row_evidence(
+        original_evidence_tables, "Original inspection"
+    )
+    working_row_evidence = render_row_evidence(
+        working_evidence_tables, "Working-copy reinspection"
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -439,6 +537,7 @@ def build_inspection_report_html(
     <div><span>File size</span><strong>{_escape(profile['file_size'])}</strong></div>
     <div><span>Rows</span><strong>{profile['row_count']}</strong></div>
     <div><span>Columns</span><strong>{profile['column_count']}</strong></div>
+    <div><span>Report created</span><strong>{_escape(created_at)}</strong></div>
   </div></section>
   <section><h2>Structural profile</h2>{profile_table}</section>
   <section>
@@ -449,7 +548,9 @@ def build_inspection_report_html(
     <p class="note">The Dataset Integrity Score is a custom TALOS heuristic and is not an industry-standard data quality measure.</p>
   </section>
   {original_inspection}
+  {original_row_evidence}
   {working_sections}
+  {working_row_evidence}
   <section>
     <h2>Original and working-copy comparison</h2>
     <p>Fewer findings do not automatically mean the dataset is more suitable for its intended use.</p>
@@ -462,5 +563,5 @@ def build_inspection_report_html(
     <li>Transformations are user-approved and applied to a separate working copy.</li>
     <li>The original uploaded dataset remains unchanged by TALOS.</li>
   </ul></section>
-  <footer>Generated by TALOS · The original uploaded data remains untouched.</footer>
+  <footer>Generated by TALOS · The original uploaded DataFrame was not mutated; approved changes belong to a separate working copy.</footer>
 </main></body></html>"""

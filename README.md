@@ -1,40 +1,49 @@
-# ⚙️ TALOS
+# TALOS
 
-[Open the live TALOS app](https://talos-app.streamlit.app/)
+**A watchful guardian that inspects data before it is trusted.**
 
-TALOS is a Python data inspection tool built around a simple idea: **a watchful guardian should inspect data before it is trusted.** Inspired by the bronze automaton of Greek mythology, TALOS stands between messy source data and reliable analysis.
+[Open the live Streamlit app](https://talos-app.streamlit.app/) · [View the source](https://github.com/Jesi-Jemison/TALOS)
 
-It profiles an uploaded CSV, explains quality signals, proposes possible repairs, and prepares a separate working copy only when the user approves. The original uploaded DataFrame remains untouched.
+TALOS is a Python data-inspection application inspired by the bronze automaton guardian of Greek mythology. It profiles a CSV, explains quality signals, and lets a person prepare and approve repairs to a separate working copy. The uploaded source stays untouched.
 
-## What TALOS does
+## Try the demo
 
-- Profiles file details, dataset dimensions, broad column types, and a ten-row preview.
-- Inspects missing values, exact duplicate rows, category variants, IQR outliers, structural signals, and possible identifiers.
-- Calculates a transparent, custom Dataset Integrity Score.
-- Offers user-controlled transformations in **The Forge**, previews them, and records approved changes in a session-only **Transformation Ledger**.
-- Exports the working copy as CSV, the transformation ledger as CSV, and a self-contained **TALOS Inspection Report** as HTML.
+Open the [live app](https://talos-app.streamlit.app/) and choose **Load TALOS demo dataset**. The deterministic, synthetic dataset includes missing values, exact duplicates, category variants, an IQR outlier, repeated identifier values, empty and constant columns, and a zero-heavy measure. No real personal information is used.
 
-Signals are not proof that data is wrong. Repeated records, outliers, negative values, and constant fields can be valid in context. TALOS does not automatically modify data or infer business meaning.
+## TALOS in action
 
-## The Forge and data-state model
+Screenshots use the built-in synthetic demo data.
 
-The app keeps four distinct pieces of state:
+![TALOS dataset inspection and integrity score](assets/screenshots/talos-demo-overview.png)
+
+| The Forge | Evidence Vault |
+| --- | --- |
+| ![Selected repair plan and working-copy comparison](assets/screenshots/talos-demo-forge.png) | ![Portable inspection evidence and report exports](assets/screenshots/talos-demo-evidence.png) |
+
+## What it does
+
+- Reads and profiles CSV files, then previews the source structure and records.
+- Inspects missingness, exact duplicate rows, category variation, IQR outliers, possible identifiers, empty and constant columns, high-cardinality text, and numeric patterns.
+- Calculates an explainable, custom **Dataset Integrity Score** with visible components and weights.
+- Offers granular, user-selected repairs in **The Forge**. Each selection becomes a previewable Repair Plan before anything is applied.
+- Reinspects the working copy after approval, compares it with the source, and records each operation in a transformation ledger.
+- Exports result tables as CSV, a cleaned working copy, the ledger, a printable HTML dossier, and a ZIP evidence pack.
+- Provides session-level dark and light themes.
+
+## The workflow
 
 ```text
-uploaded CSV → original_df → findings and suggestions
-                         ↘ working_df → approved transformations → ledger
+INGEST → INSPECT → UNDERSTAND → SELECT → PREVIEW → REPAIR
+       → REINSPECT → COMPARE → EXPORT → DOCUMENT
 ```
 
-- `original_df` is kept as the source for comparison and reset.
-- `working_df` begins as a deep copy and is replaced only after the user previews and approves a transformation.
-- Findings are recalculated for the current working copy; the original inspection remains separately available.
-- The Transformation Ledger records each approved action and its parameters and examples. Reset restores a fresh copy of `original_df` and clears the ledger.
+`original_df` is retained for reference and reset. `working_df` starts as a deep copy and is replaced only after an approved plan succeeds. Original and working-copy findings are kept separately; the ledger records actions, parameters, row and column counts, and representative before/after values. Reset restores a fresh copy of the source.
 
-Supported actions include whitespace normalization, choosing a canonical form for detected category variants, exact duplicate-row removal, user-selected missing-value handling, and removal of completely empty columns. TALOS leaves outliers, identifier repeats, high-cardinality text, and other context-dependent signals alone.
+TALOS does not treat a signal as proof of an error. An outlier can be valid; identifier uniqueness depends on context; repeated keys, constant columns, and negative or zero-heavy values may be intentional. No transformation is applied silently.
 
 ## Dataset Integrity Score
 
-The score is a **custom illustrative TALOS heuristic**, not an industry standard or a guarantee that data is correct. It ranges from 0 to 100 with these weights:
+The score is a **custom TALOS heuristic**, not an industry standard or a guarantee that data is correct. It summarises only the checks TALOS currently implements.
 
 | Component | Weight |
 | --- | ---: |
@@ -44,9 +53,34 @@ The score is a **custom illustrative TALOS heuristic**, not an industry standard
 | Structural health | 20% |
 | IQR outlier signal | 15% |
 
-The completeness component combines the missing-cell percentage and the share of columns with any missing values, so gaps distributed across many fields are visible in the score. The app shows every component and weight. See [the scoring methodology](docs/scoring_methodology.md) for formulas, bands, exclusions, and limitations.
+The score breakdown, methodology, exclusions, and limitations are in [the scoring notes](docs/scoring_methodology.md). After a repair, TALOS shows component and finding changes while reminding users that a higher score does not establish suitability.
 
-## Run TALOS locally
+The local synthetic performance check and its limits are documented in [performance notes](docs/performance_notes.md).
+
+## Architecture
+
+```text
+app.py
+  Streamlit layout, interaction, session state, and output controls
+
+src/
+  profiler.py          CSV intake, type identification, and dataset profile
+  quality_checks.py    Read-only pandas inspections
+  scoring.py           Transparent weighted integrity score
+  transformations.py   Copy-returning repairs, plan estimates, and ledger records
+  evidence.py          Portable findings tables and ZIP pack assembly
+  reporting.py         CSV serialization and self-contained HTML report
+  theme.py             Dark/light colour tokens
+
+assets/                TALOS CSS, emblem, and demo screenshots
+data/sample/           Synthetic showcase CSV
+tests/                 Unit and Streamlit flow tests
+  docs/                  Scoring, performance, and portfolio notes
+```
+
+The analysis is implemented directly with Python, pandas, and NumPy. TALOS does not use a third-party profiling or data-validation framework.
+
+## Run locally
 
 ```bash
 git clone https://github.com/Jesi-Jemison/TALOS.git
@@ -57,42 +91,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Run the automated tests with:
+Run the test suite with:
 
 ```bash
 python -m pytest -q
 ```
 
-## Data handling
+## Privacy and limitations
 
-CSV bytes, the original DataFrame, working copy, report, and ledger are processed in the Streamlit session. TALOS does not intentionally save them to persistent storage. Do not upload confidential, sensitive, or personally identifiable information.
+Uploaded CSV bytes, source and working DataFrames, findings, report HTML, and ledger are held in the active Streamlit session. TALOS does not intentionally save uploaded data to persistent storage, use a database, create user accounts, or send telemetry. Avoid uploading confidential, sensitive, or personally identifiable information.
 
-## Project structure
+TALOS reads CSV files only. Its rules do not infer business context, enforce a schema, or prove that a dataset is ready for a specific decision. Missing-value strategies and category mappings require a user's choice. PDF export is not included; the self-contained HTML report is the printable canonical report.
 
-```text
-TALOS/
-├── app.py                         # Streamlit layout and interaction
-├── .streamlit/config.toml         # Dark application theme
-├── assets/
-│   ├── talos-emblem.svg           # Original guardian insignia
-│   ├── talos.css                  # TALOS interface styling
-│   └── screenshots/
-├── data/sample/                   # Reserved for future showcase data
-├── docs/
-│   └── scoring_methodology.md     # Score calculations and limits
-├── src/
-│   ├── profiler.py                # CSV loading and structural profile
-│   ├── quality_checks.py          # Read-only data-quality checks
-│   ├── scoring.py                 # Weighted, explainable score
-│   ├── transformations.py         # Copy-returning working-copy operations
-│   └── reporting.py               # CSV exports and HTML inspection report
-└── tests/                         # Profiling, checks, transformations, and reports
-```
+## Project status
 
-The interface stays in `app.py`; reusable profiling, inspection, transformation, scoring, and report logic lives in `src/`. The implementation uses pandas and straightforward Python rather than third-party profiling frameworks.
-
-## Current status
-
-Stages 1–11 are implemented: infrastructure, CSV intake and profiling, quality checks, an explainable score, user-approved working-copy transformations, CSV exports, and the HTML Inspection Report. Stage 12 demo mode and Stage 13 final product polish remain future work.
-
-TALOS is an entry-to-mid-level Python portfolio project. The priority is readable pandas logic, explicit functions, tests, and methods that can be explained in an interview. The Forge proposes; the user decides.
+Stages 1–15 are implemented: intake, profiling, inspection, scoring, controlled repair, reinspection, evidence export, theme preferences, and showcase mode. The focus is a clear, testable portfolio example of pandas analysis and responsible data-cleaning workflow.

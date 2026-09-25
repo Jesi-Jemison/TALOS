@@ -199,3 +199,32 @@ def test_html_report_handles_no_transformations_and_escapes_uploaded_names():
     assert "customer &lt;report&gt;.csv" in report
     assert "customer <report>.csv" not in report
     assert "The original uploaded dataset remains unchanged" in report
+
+
+def test_html_report_includes_row_evidence_creation_note_and_escapes_cell_values():
+    original, findings, profile, summary = build_report_inputs()
+    evidence_tables = {
+        "outliers.csv": pd.DataFrame(
+            {
+                "Column": ["<script>alert(1)</script>"],
+                "Value": [1000],
+                "Source row (1-based)": [10],
+            }
+        )
+    }
+    report = build_inspection_report_html(
+        profile,
+        findings,
+        findings,
+        summary,
+        summary,
+        [],
+        original_evidence_tables=evidence_tables,
+        created_at="2026-09-25T00:00:00+00:00",
+    )
+
+    assert "2026-09-25T00:00:00+00:00" in report
+    assert "Flagged numeric values" in report
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in report
+    assert "<script>alert(1)</script>" not in report
+    assert "Fewer findings do not automatically" in report

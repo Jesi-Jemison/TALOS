@@ -13,6 +13,8 @@ from src.quality_checks import (
 from src.transformations import (
     append_ledger_record,
     apply_transformation,
+    apply_transformations,
+    build_repair_plan,
     build_suggested_transformations,
     create_working_copy,
     reset_working_copy,
@@ -253,3 +255,53 @@ def test_working_copy_reset_and_ledger_are_independent():
     assert restored.loc[0, "region"] == "north "
     assert ledger == []
     assert updated_ledger[0]["parameters"]["case_sensitive"] is True
+
+
+def test_repair_plan_applies_only_selected_actions_and_estimates_scope():
+    original = pd.DataFrame(
+        {
+            "region": ["North ", "north", "South", "South"],
+            "amount": [10.0, None, 30.0, 40.0],
+            "empty": [None, None, None, None],
+        }
+    )
+    source_copy = original.copy(deep=True)
+    actions = [
+        {
+            "type": "fill_numeric_missing",
+            "column": "amount",
+            "method": "median",
+            "label": "Fill with median · amount",
+        },
+        {
+            "type": "remove_empty_column",
+            "column": "empty",
+            "label": "Remove empty column · empty",
+        },
+    ]
+
+    plan = build_repair_plan(original, actions)
+
+    assert plan["selected_count"] == 2
+    assert plan["affected_columns"] == ["amount", "empty"]
+    assert plan["estimated_values_changed"] == 1
+    assert plan["estimated_rows_removed"] == 0
+    assert plan["estimated_columns_removed"] == 1
+    assert plan["preview_df"].loc[1, "amount"] == 30
+    assert "region" in plan["preview_df"].columns
+    assert all(record["parameters"]["operation"] == action["type"] for action, record in zip(actions, plan["records"]))
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_batch_failure_returns_no_partial_frame_and_keeps_source_untouched():
+    original = pd.DataFrame({"amount": [1.0, None], "text": ["kept", None]})
+    source_copy = original.copy(deep=True)
+    actions = [
+        {"type": "fill_numeric_missing", "column": "amount", "method": "median"},
+        {"type": "remove_empty_column", "column": "text"},
+    ]
+
+    with pytest.raises(ValueError, match="completely empty"):
+        apply_transformations(original, actions)
+
+    pd.testing.assert_frame_equal(original, source_copy)

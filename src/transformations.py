@@ -35,6 +35,57 @@ def append_ledger_record(
     return updated_ledger
 
 
+def apply_transformations(
+    df: pd.DataFrame, actions: list[dict[str, Any]]
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Apply an ordered repair plan to copies and return one record per action.
+
+    The caller receives no partial result if an action fails. The input frame
+    remains untouched, so applying the returned result is an explicit UI step.
+    """
+    working_copy = df.copy(deep=True)
+    records = []
+    for action in actions:
+        working_copy, record = apply_transformation(working_copy, action)
+        if action.get("label"):
+            record["transformation_type"] = action["label"]
+            record["action"] = action["label"]
+            record["parameters"]["operation"] = action["type"]
+        records.append(record)
+    return working_copy, records
+
+
+def build_repair_plan(
+    df: pd.DataFrame, actions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Preview selected actions and summarize their expected scope."""
+    preview_df, records = apply_transformations(df, actions)
+    value_change_types = {
+        "normalize_whitespace",
+        "consolidate_category",
+        "fill_numeric_missing",
+        "fill_text_missing",
+    }
+    affected_columns = list(
+        dict.fromkeys(
+            str(action.get("column") or "All columns") for action in actions
+        )
+    )
+    return {
+        "selected_count": len(actions),
+        "affected_columns": affected_columns,
+        "estimated_values_changed": sum(
+            record["affected_rows"]
+            for action, record in zip(actions, records)
+            if action.get("type") in value_change_types
+        ),
+        "estimated_rows_removed": max(0, len(df.index) - len(preview_df.index)),
+        "estimated_columns_removed": max(0, len(df.columns) - len(preview_df.columns)),
+        "records": records,
+        "preview_df": preview_df,
+    }
+
+
 def normalize_whitespace(value: object) -> object:
     """Trim text and collapse repeated internal whitespace without altering other values."""
     if isinstance(value, str):
@@ -56,6 +107,30 @@ def count_whitespace_changes(series: pd.Series) -> int:
         isinstance(value, str) and normalize_whitespace(value) != value
         for value in series
     )
+
+
+def _preferred_category_variant(variants: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose a common, cleanly formatted observed value as the proposal."""
+    def rank(item: dict[str, Any]) -> tuple[int, int, int, str, str]:
+        value = str(item["value"])
+        normalized_whitespace = " ".join(value.split())
+        if value == value.title():
+            case_preference = 0
+        elif value.isupper():
+            case_preference = 1
+        elif value.islower():
+            case_preference = 2
+        else:
+            case_preference = 3
+        return (
+            -int(item["count"]),
+            int(value != normalized_whitespace),
+            case_preference,
+            value.casefold(),
+            value,
+        )
+
+    return min(variants, key=rank)
 
 
 def build_suggested_transformations(
@@ -89,7 +164,7 @@ def build_suggested_transformations(
         if len(whitespace_normalized) == 1:
             continue
 
-        most_common = max(variants, key=lambda item: item["count"])
+        most_common = _preferred_category_variant(variants)
         column = group["column"]
         normalized_value = group["normalized_value"]
         suggestions.append(
@@ -102,6 +177,7 @@ def build_suggested_transformations(
                 ),
                 "affected_count": sum(item["count"] for item in variants if item["value"] != most_common["value"]),
                 "column": column,
+                "normalized_value": normalized_value,
                 "variants": deepcopy(variants),
                 "proposed_canonical": most_common["value"],
                 "action": {
