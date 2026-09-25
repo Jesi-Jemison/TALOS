@@ -63,6 +63,15 @@ def theme_token_css(theme: str) -> str:
     tokens = THEME_TOKENS[name]
     declarations = [f"color-scheme: {tokens['color-scheme']};"]
     declarations.extend(
+        [
+            "--background-color: var(--talos-bg);",
+            "--secondary-background-color: var(--talos-panel);",
+            "--text-color: var(--talos-text);",
+            "--primary-color: var(--talos-bronze);",
+            "--link-color: var(--talos-violet);",
+        ]
+    )
+    declarations.extend(
         f"--{key}: {value};"
         for key, value in tokens.items()
         if key != "color-scheme"

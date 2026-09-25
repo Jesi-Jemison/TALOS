@@ -186,6 +186,21 @@ body, .stApp {
     background: var(--talos-panel);
 }
 
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] label *,
+[data-testid="stFileUploaderDropzone"] p,
+[data-testid="stFileUploaderDropzone"] span {
+    color: var(--talos-text) !important;
+    opacity: 1;
+}
+
+[data-testid="stFileUploaderDropzone"] button {
+    border: 1px solid var(--talos-line);
+    border-radius: 7px;
+    background: var(--talos-panel-raised);
+    color: var(--talos-text) !important;
+}
+
 [data-testid="stDataFrame"] {
     overflow: hidden;
     border: 1px solid var(--talos-line);

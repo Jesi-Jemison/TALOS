@@ -14,11 +14,13 @@ Open the [live app](https://talos-app.streamlit.app/) and choose **Load TALOS de
 
 Screenshots use the built-in synthetic demo data.
 
-![TALOS dataset inspection and integrity score](assets/screenshots/talos-demo-overview.png)
+![TALOS first-run upload screen and workflow guide](assets/screenshots/talos-landing-20260925.jpg)
+
+![TALOS dataset inspection and integrity score](assets/screenshots/talos-demo-overview-20260925.jpg)
 
 | The Forge | Evidence Vault |
 | --- | --- |
-| ![Selected repair plan and working-copy comparison](assets/screenshots/talos-demo-forge.png) | ![Portable inspection evidence and report exports](assets/screenshots/talos-demo-evidence.png) |
+| ![Selected repair plan and working-copy comparison](assets/screenshots/talos-demo-forge-20260925.jpg) | ![Portable inspection evidence and report exports](assets/screenshots/talos-demo-evidence-20260925.jpg) |
 
 ## What it does
 

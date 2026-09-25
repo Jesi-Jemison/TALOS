@@ -31,6 +31,7 @@ def test_dark_is_default_and_themes_share_one_complete_token_shape():
     assert set(THEME_TOKENS["Dark"]) == set(THEME_TOKENS["Light"])
     assert normalize_theme_name(" light ") == "Light"
     assert "--talos-bg" in theme_token_css("Dark")
+    assert "--text-color: var(--talos-text)" in theme_token_css("Light")
     assert "color-scheme: light" in theme_token_css("Light")
 
 
