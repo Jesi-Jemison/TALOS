@@ -101,6 +101,9 @@ def recommend_text_normalisation_columns(df: pd.DataFrame) -> list[str]:
         if not len(observed) or not observed.map(lambda value: isinstance(value, str)).all():
             continue
         name = str(column)
+        # Case changes can alter identifiers and the meaning of free text even
+        # when a field happens to have few distinct values, so keep these names
+        # opt-in instead of recommending them as controlled categories.
         if _RISKY_TEXT_COLUMN.search(name):
             continue
         distinct_count = int(observed.nunique(dropna=True))

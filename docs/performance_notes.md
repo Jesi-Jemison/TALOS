@@ -19,3 +19,29 @@ The evidence ZIPs were about 8.9 KB, 39.7 KB, and 171.9 KB for these cases. ZIP 
 ## Interpretation
 
 In these synthetic checks, CSV parsing, pandas inspections, reinspection, report generation, and evidence packaging were all below one second at 25,250 rows. Inspection and reinspection took the largest share. TALOS caches findings and prepared evidence by source fingerprint and working-copy revision, shows only a short raw-data preview, caps on-screen duplicate/outlier examples, and keeps full applicable result tables in exports. Larger real files and unusual high-cardinality text should still be profiled in their intended deployment environment.
+
+## Standalone Python workflow
+
+Measured on 2026-09-25 with Python 3.12.14, pandas 2.2.3, and NumPy 2.3.5.
+Each timing is the mean of five calls in one process after a warm-up. The core
+column is `inspect_dataset(frame)`; `TalosSession.inspect()` measures the public
+standalone session API on the same input. Session creation is measured
+separately and includes defensive copies plus a CSV-sized profile value. The
+session is constructed before timing the inspection call.
+
+The demo measurement uses the checked-in 161-row CSV. The larger frames are
+seeded synthetic data with mixed category spellings, missing values, numeric
+patterns, a high outlier, a constant column, and an empty column. A 1% sample of
+exact duplicate rows is appended, so the measured larger frames contain 5,050
+and 25,250 rows.
+
+| Measured rows | Shared core inspection | `TalosSession.inspect()` | Session creation |
+| ---: | ---: | ---: | ---: |
+| 161 | 4.62 ms | 4.96 ms | 0.66 ms |
+| 5,050 | 29.59 ms | 29.98 ms | 12.52 ms |
+| 25,250 | 120.30 ms | 121.88 ms | 54.89 ms |
+
+The measured inspection API was within 7.4% of the direct shared-core call at
+demo scale and within 1.3% at the two larger sizes. These are local synthetic
+measurements; actual CSV parsing, machine load, and dataset shape will affect
+end-to-end timings.

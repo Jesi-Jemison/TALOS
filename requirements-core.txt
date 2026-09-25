@@ -1,0 +1,4 @@
+# Standalone TALOS Python and CLI workflows (no Streamlit dependency).
+pandas
+numpy
+reportlab>=4.2,<5

@@ -28,14 +28,7 @@ from src.evidence import (
     build_structure_table,
     build_structural_findings_table,
 )
-from src.quality_checks import (
-    inspect_category_consistency,
-    inspect_duplicates,
-    inspect_missing_values,
-    inspect_numeric_outliers,
-    inspect_structure,
-)
-from src.scoring import calculate_integrity_score
+from src.workflow import inspect_dataset, summarize_dataset
 from src.theme import DEFAULT_THEME, theme_token_css, theme_tokens
 from src.reporting import (
     build_cleaned_csv,
@@ -764,26 +757,6 @@ def render_integrity_score(
             """,
             unsafe_allow_html=True,
         )
-
-
-def inspect_dataset(df: pd.DataFrame) -> dict[str, dict[str, object]]:
-    """Run every read-only inspection and calculate the summary score."""
-    findings = {
-        "missing": inspect_missing_values(df),
-        "duplicates": inspect_duplicates(df),
-        "categories": inspect_category_consistency(df),
-        "outliers": inspect_numeric_outliers(df),
-        "structure": inspect_structure(df),
-    }
-    findings["score"] = calculate_integrity_score(
-        df,
-        findings["missing"],
-        findings["duplicates"],
-        findings["categories"],
-        findings["outliers"],
-        findings["structure"],
-    )
-    return findings
 
 
 def initialize_dataset_state(file_fingerprint: str, uploaded_df: pd.DataFrame) -> bool:
@@ -1600,22 +1573,6 @@ def render_transformation_ledger(
                     width="stretch",
                     hide_index=True,
                 )
-
-
-def summarize_dataset(
-    df: pd.DataFrame, findings: dict[str, dict[str, object]]
-) -> dict[str, object]:
-    """Collect a compact before/after summary without implying improvement."""
-    return {
-        "row_count": len(df.index),
-        "column_count": len(df.columns),
-        "missing_cells": findings["missing"]["total_missing_cells"],
-        "duplicate_rows": findings["duplicates"]["exact_duplicate_row_count"],
-        "category_variant_groups": findings["categories"]["inconsistent_group_count"],
-        "outlier_values": findings["outliers"]["total_outlier_values"],
-        "empty_columns": len(findings["structure"]["empty_columns"]),
-        "score": findings["score"]["score"],
-    }
 
 
 def render_dataset_comparison(
