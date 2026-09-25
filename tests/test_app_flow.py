@@ -341,6 +341,10 @@ def test_manual_column_removal_waits_for_approval_reinspects_and_can_reset():
     assert app.session_state["talos_transformation_ledger"] == []
     assert any(item.value == "Repair Plan" for item in app.subheader)
     assert any("Current columns: 3" in item.value and "After repair: 1 column" in item.value for item in app.markdown)
+    assert any(
+        "Preview only" in item.value and "after approval" in item.value
+        for item in app.markdown
+    )
 
     app.button(key="talos-apply-selected-repairs").click().run()
     assert not app.exception
@@ -380,6 +384,13 @@ def test_outlier_remediation_per_column_requires_approval_and_reinspects():
     assert app.session_state["talos_transformation_ledger"] == []
     assert any("5.5" in item.value for item in app.markdown)
     assert any(item.value == "Repair Plan" for item in app.subheader)
+    assert any(
+        "Preview only" in item.value and "after approval" in item.value
+        for item in app.markdown
+    )
+    assert not any(
+        "Applied the approved per-column" in item.value for item in app.markdown
+    )
 
     app.button(key="talos-apply-selected-repairs").click().run()
     assert not app.exception

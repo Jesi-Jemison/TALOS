@@ -1729,15 +1729,28 @@ def render_repair_control_center(
 
     for action, record in zip(selected_actions, plan["records"]):
         with st.expander(f"Preview · {action.get('label', action['type'])}", expanded=False):
-            st.write(record["description"])
-            if action.get("type") == "remove_columns":
+            action_type = action.get("type")
+            if action_type == "remove_columns":
                 chosen_columns = list(action["columns"])
+                st.write(
+                    f"Preview only. {count_label(len(chosen_columns), 'selected column')} "
+                    "will be removed from the working copy after approval."
+                )
                 st.markdown("**Selected columns:** " + ", ".join(map(str, chosen_columns)))
                 st.markdown(
                     f"Current columns: {len(working_df.columns):,} · Remove: {len(chosen_columns):,} · "
                     f"After repair: {count_label(len(plan['preview_df'].columns), 'column')}"
                 )
+            elif action_type == "remove_empty_column":
+                st.write(
+                    f"Preview only. The empty column {action.get('column')!r} will be removed "
+                    "from the working copy after approval."
+                )
             elif action.get("type") == "remediate_outliers":
+                st.write(
+                    "Preview only. These per-column actions will be applied to the working "
+                    "copy after approval."
+                )
                 outlier_plan = action["plan"]
                 st.markdown("**Per-column IQR actions**")
                 st.caption(
@@ -1775,6 +1788,8 @@ def render_repair_control_center(
                             width="stretch",
                             hide_index=True,
                         )
+            else:
+                st.write(record["description"])
             if action.get("type") == "normalize_text":
                 text_plan = action["plan"]
                 st.markdown("**Text Normalisation**")
