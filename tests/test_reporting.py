@@ -18,6 +18,7 @@ from src.reporting import (
     build_cleaned_csv,
     build_export_filename,
     build_inspection_report_html,
+    build_inspection_report_pdf,
     build_transformation_log,
 )
 from src.scoring import calculate_integrity_score
@@ -72,6 +73,7 @@ def test_export_filenames_are_predictable_and_strip_path_components():
     assert build_export_filename("C:\\upload\\orders.csv", "transformations") == "orders_talos_transformations.csv"
     assert build_export_filename(".csv", "report") == "dataset_talos_report.html"
     assert build_export_filename("orders.csv", "working-missing") == "orders_talos_working_missing_values.csv"
+    assert build_export_filename("orders.csv", "pdf_report") == "orders_talos_report.pdf"
 
 
 def test_cleaned_csv_contains_dataframe_without_index_and_is_utf8():
@@ -183,6 +185,10 @@ def test_html_report_contains_profile_findings_score_ledger_and_embedded_emblem(
     assert "data:image/svg+xml;base64," in report
     assert "Original and working-copy comparison" in report
     HTMLParser().feed(report)
+    assert "table-layout: auto" in report
+    assert "overflow-wrap: break-word" in report
+    assert "white-space: nowrap" in report
+    assert ".talos-table-wrap--wide table" in report
 
 
 def test_html_report_handles_no_transformations_and_escapes_uploaded_names():
@@ -229,3 +235,28 @@ def test_html_report_includes_row_evidence_creation_note_and_escapes_cell_values
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in report
     assert "<script>alert(1)</script>" not in report
     assert "Fewer findings do not automatically" in report
+
+
+def test_pdf_report_is_generated_as_a_printable_standalone_document():
+    original, findings, profile, summary = build_report_inputs()
+    working = original.drop(columns=["empty_field"]).copy(deep=True)
+    working_findings = build_findings(working)
+    working_summary = {
+        **summary,
+        "column_count": len(working.columns),
+        "missing_cells": working_findings["missing"]["total_missing_cells"],
+        "duplicate_rows": working_findings["duplicates"]["exact_duplicate_row_count"],
+        "score": working_findings["score"]["score"],
+    }
+    pdf = build_inspection_report_pdf(
+        profile,
+        findings,
+        working_findings,
+        summary,
+        working_summary,
+        [],
+        created_at="2026-09-25T00:00:00+00:00",
+    )
+
+    assert pdf.startswith(b"%PDF-")
+    assert len(pdf) < 1_000_000

@@ -96,16 +96,35 @@ h3 { margin: 22px 0 8px; font-size: 16px; }
 }
 .meta-grid span, .summary-grid span { display: block; color: var(--muted); font-size: 12px; }
 .meta-grid strong, .summary-grid strong { display: block; margin-top: 4px; font-size: 18px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.table-scroll { width: 100%; overflow-x: auto; }
+.talos-table-wrap, .table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; table-layout: auto; font-size: 13px; }
+.talos-table-wrap--wide table, .table-scroll table { min-width: 760px; }
+.talos-table--profile th:nth-child(1) { width: 42%; }
+.talos-table--integrity-score th:nth-child(1) { width: 34%; }
+.talos-table--integrity-score th:nth-child(2),
+.talos-table--integrity-score th:nth-child(3),
+.talos-table--integrity-score th:nth-child(4) { width: 22%; }
+.talos-table--missing-values th:nth-child(1) { width: 16%; }
+.talos-table--missing-values th:nth-child(6) { width: 34%; }
+.talos-table--category-variants th:nth-child(3) { width: 52%; }
+.talos-table--transformation-ledger th:nth-child(4),
+.talos-table--transformation-ledger th:nth-child(5),
+.talos-table--transformation-ledger th:nth-child(6) { width: 24%; }
+.talos-table--comparison th:first-child { width: 50%; }
 th, td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
+  hyphens: none;
 }
 th { color: var(--plum); background: #E8E0D1; }
+th.compact-cell, td.compact-cell { white-space: nowrap; }
+th.long-cell, td.long-cell { min-width: 11rem; max-width: 25rem; white-space: normal; }
+td.long-token { overflow-wrap: anywhere; }
+.report-note { color: var(--muted); font-size: 12px; }
 .empty-row { color: var(--muted); text-align: center; }
 .score {
   padding: 14px 18px;
@@ -117,9 +136,16 @@ th { color: var(--plum); background: #E8E0D1; }
 .note, footer { color: var(--muted); font-size: 13px; }
 footer { padding: 18px 4px; font-size: 12px; }
 @media print {
+  @page { size: A4 landscape; margin: 12mm; }
   body { background: #fff; }
   .page { max-width: none; padding: 0; }
-  section { box-shadow: none; }
+  section { box-shadow: none; break-inside: auto; }
+  h2, h3 { break-after: avoid; }
+  .talos-table-wrap, .table-scroll { overflow: visible; }
+  table { font-size: 9pt; }
+  th, td { padding: 5pt 6pt; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
   header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
 @media (max-width: 700px) {
@@ -141,6 +167,7 @@ def build_export_filename(original_filename: str, export_type: str) -> str:
         "cleaned": "cleaned.csv",
         "transformations": "transformations.csv",
         "report": "report.html",
+        "pdf_report": "report.pdf",
         "structure": "structure.csv",
         "missing": "missing_values.csv",
         "duplicates": "duplicate_rows.csv",
@@ -204,21 +231,58 @@ def _escape(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _render_table(headers: list[str], rows: list[list[object]]) -> str:
-    """Create an escaped HTML table from simple header and row values."""
-    header_html = "".join(f"<th>{_escape(value)}</th>" for value in headers)
+def _table_cell_class(header: str, value: object = "") -> str:
+    """Select compact or narrative wrapping for a known table field."""
+    normalized = header.casefold()
+    compact_terms = (
+        "%", "count", "rows", "columns", "weight", "score", "points", "severity",
+        "dtype", "type", "status", "uniqueness", "outlier", "q1", "q3", "median",
+        "bound", "missing", "affected", "position", "source row",
+    )
+    long_terms = (
+        "explanation", "effect", "description", "observed", "variant", "before and after",
+        "parameters", "limitations", "canonical", "signal",
+    )
+    classes = []
+    if any(term in normalized for term in compact_terms):
+        classes.append("compact-cell")
+    elif any(term in normalized for term in long_terms):
+        classes.append("long-cell")
+    text = str(value)
+    if len(text) > 36 and not any(character.isspace() for character in text):
+        classes.append("long-token")
+    return " ".join(classes)
+
+
+def _render_table(
+    headers: list[str], rows: list[list[object]], table_name: str = "", wide: bool | None = None
+) -> str:
+    """Create an escaped, responsive HTML table with field-aware wrapping."""
+    wide = len(headers) >= 6 if wide is None else wide
+    wrapper_class = "talos-table-wrap talos-table-wrap--wide" if wide else "talos-table-wrap"
+    header_html = "".join(
+        f'<th class="{_table_cell_class(str(value))}">{_escape(value)}</th>'
+        for value in headers
+    )
     if not rows:
         body_html = (
             f'<tr><td class="empty-row" colspan="{len(headers)}">No findings recorded.</td></tr>'
         )
     else:
         body_html = "".join(
-            "<tr>" + "".join(f"<td>{_escape(value)}</td>" for value in row) + "</tr>"
+            "<tr>"
+            + "".join(
+                f'<td class="{_table_cell_class(str(header), value)}">{_escape(value)}</td>'
+                for header, value in zip(headers, row)
+            )
+            + "</tr>"
             for row in rows
         )
+    table_class = f"talos-table--{table_name}" if table_name else ""
+    table_attribute = f' class="{_escape(table_class)}"' if table_class else ""
     return (
-        f"<table><thead><tr>{header_html}</tr></thead>"
-        f"<tbody>{body_html}</tbody></table>"
+        f'<div class="{wrapper_class}"><table{table_attribute}><thead><tr>{header_html}</tr></thead>'
+        f"<tbody>{body_html}</tbody></table></div>"
     )
 
 
@@ -351,6 +415,7 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
       {_render_table(
           ['Column', 'Pandas type', 'Missing', 'Missing %', 'Severity', 'Possible effect'],
           missing_rows,
+          'missing-values',
       )}
       <h3>Exact duplicate rows and identifier signals</h3>
       <p>{duplicates['exact_duplicate_row_count']} exact duplicate rows ({duplicates['exact_duplicate_percentage']:.1f}% of rows).</p>
@@ -359,7 +424,7 @@ def _findings_sections(findings: dict[str, Any], heading: str) -> str:
           duplicate_rows,
       )}
       <h3>Category variants</h3>
-      {_render_table(['Column', 'Normalized form', 'Observed values'], category_rows)}
+      {_render_table(['Column', 'Normalized form', 'Observed values'], category_rows, 'category-variants')}
       <h3>Numeric outliers</h3>
       {_render_table(
           ['Column', 'Outliers', 'Outlier %', 'Q1', 'Median', 'Q3', 'Lower IQR bound', 'Upper IQR bound'],
@@ -427,6 +492,7 @@ def build_inspection_report_html(
                 "Before and after examples",
             ],
             ledger_rows,
+            'transformation-ledger',
         )
     else:
         ledger_section = "<p>No transformations were approved. The working copy matches the original.</p>"
@@ -464,17 +530,18 @@ def build_inspection_report_html(
         ],
     ]
     profile_table = _render_table(
-        ["Column", "Pandas type", "TALOS type"], columns
+        ["Column", "Pandas type", "TALOS type"], columns, "profile"
     )
     original_score_table = _render_table(
         ["Component", "Weight", "Component score", "Weighted points"],
         _score_rows(original_findings),
+        "integrity-score",
     )
     original_inspection = _findings_sections(
         original_findings, "Original dataset inspection"
     )
     comparison_table = _render_table(
-        ["Measure", "Original", "Working copy"], comparison_rows
+        ["Measure", "Original", "Working copy"], comparison_rows, "comparison"
     )
     working_score = working_findings["score"]
     working_score_text = (
@@ -485,6 +552,7 @@ def build_inspection_report_html(
     working_score_table = _render_table(
         ["Component", "Weight", "Component score", "Weighted points"],
         _score_rows(working_findings),
+        "integrity-score",
     )
     working_sections = f"""
       <section><h2>Current working-copy integrity score</h2>
@@ -573,3 +641,352 @@ def build_inspection_report_html(
   </ul></section>
   <footer>Generated by TALOS · The original uploaded DataFrame was not mutated; approved changes belong to a separate working copy.</footer>
 </main></body></html>"""
+
+
+def build_inspection_report_pdf(
+    profile: dict[str, Any],
+    original_findings: dict[str, Any],
+    working_findings: dict[str, Any],
+    original_summary: dict[str, Any],
+    working_summary: dict[str, Any],
+    ledger: list[dict[str, Any]],
+    guardian_image: bytes | None = None,
+    original_evidence_tables: dict[str, pd.DataFrame] | None = None,
+    working_evidence_tables: dict[str, pd.DataFrame] | None = None,
+    created_at: str | None = None,
+) -> bytes:
+    """Build a structured, self-contained PDF report using pure-Python ReportLab."""
+    # Import lazily so the canonical HTML report remains available if an optional
+    # PDF dependency is absent in a deployment environment.
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        Image,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    from io import BytesIO
+
+    created_at = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    page_size = landscape(A4)
+    page_width, page_height = page_size
+    buffer = BytesIO()
+    left_margin = right_margin = 13 * mm
+    top_margin = 15 * mm
+    bottom_margin = 12 * mm
+    available_width = page_width - left_margin - right_margin
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=page_size,
+        leftMargin=left_margin,
+        rightMargin=right_margin,
+        topMargin=top_margin,
+        bottomMargin=bottom_margin,
+        title=f"TALOS Inspection Report — {profile.get('file_name', 'dataset.csv')}",
+        author="TALOS",
+        pageCompression=1,
+    )
+
+    ink = colors.HexColor("#322417")
+    muted = colors.HexColor("#534638")
+    bronze = colors.HexColor("#896337")
+    plum = colors.HexColor("#49365A")
+    line = colors.HexColor("#B7A98F")
+    pale = colors.HexColor("#F3EEE4")
+    paper = colors.HexColor("#FBF8F1")
+
+    base = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "TalosTitle", parent=base["Title"], fontName="Helvetica-Bold", fontSize=22,
+        leading=26, textColor=colors.HexColor("#F1E8D4"), alignment=TA_LEFT, spaceAfter=5,
+    )
+    section_style = ParagraphStyle(
+        "TalosSection", parent=base["Heading2"], fontName="Helvetica-Bold", fontSize=14,
+        leading=17, textColor=plum, spaceBefore=9, spaceAfter=6, keepWithNext=True,
+    )
+    subhead_style = ParagraphStyle(
+        "TalosSubhead", parent=base["Heading3"], fontName="Helvetica-Bold", fontSize=9.5,
+        leading=12, textColor=bronze, spaceBefore=6, spaceAfter=4, keepWithNext=True,
+    )
+    body_style = ParagraphStyle(
+        "TalosBody", parent=base["BodyText"], fontName="Helvetica", fontSize=8.5,
+        leading=11, textColor=ink, splitLongWords=1, spaceAfter=4,
+    )
+    small_style = ParagraphStyle(
+        "TalosSmall", parent=body_style, fontSize=7.2, leading=9, textColor=muted,
+    )
+    header_style = ParagraphStyle(
+        "TalosTableHeader", parent=body_style, fontName="Helvetica-Bold", fontSize=7.5,
+        leading=9, textColor=colors.white,
+    )
+    cell_style = ParagraphStyle(
+        "TalosTableCell", parent=body_style, fontSize=7.4, leading=9.2,
+    )
+
+    def plain(value: object, limit: int = 1600) -> str:
+        if isinstance(value, (dict, list, tuple)):
+            value = json.dumps(value, ensure_ascii=False, default=str)
+        text = str(value if value is not None else "")
+        if len(text) > limit:
+            text = text[: limit - 1] + "…"
+        return html.escape(text, quote=False).replace("\n", "<br/>")
+
+    def paragraph(value: object, style: ParagraphStyle = cell_style) -> Paragraph:
+        return Paragraph(plain(value), style)
+
+    def widths_for(headers: list[str]) -> list[float]:
+        weights = []
+        for header in headers:
+            key = header.casefold()
+            if any(word in key for word in ("explanation", "effect", "description", "observed", "variant", "parameters", "before and after", "signal")):
+                weights.append(2.3)
+            elif any(word in key for word in ("component", "column", "measure", "canonical", "transformation")):
+                weights.append(1.25)
+            elif any(word in key for word in ("count", "rows", "weight", "score", "%", "severity", "type", "status", "q1", "q3", "median", "bound")):
+                weights.append(0.78)
+            else:
+                weights.append(1.0)
+        total = sum(weights) or 1
+        return [available_width * weight / total for weight in weights]
+
+    def data_table(
+        headers: list[str], rows: list[list[object]], *, row_limit: int | None = None
+    ) -> Table:
+        shown_rows = rows if row_limit is None else rows[:row_limit]
+        cells = [[paragraph(header, header_style) for header in headers]]
+        cells.extend(
+            [paragraph(value) for value in row[: len(headers)]]
+            for row in shown_rows
+        )
+        if not shown_rows:
+            empty = [paragraph("No findings recorded.", small_style)] + [""] * max(0, len(headers) - 1)
+            cells.append(empty)
+        table = Table(
+            cells,
+            colWidths=widths_for(headers),
+            repeatRows=1,
+            splitByRow=1,
+            hAlign="LEFT",
+        )
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), plum),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.35, line),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [paper, pale]),
+                ]
+            )
+        )
+        return table
+
+    def table_section(title: str, headers: list[str], rows: list[list[object]]) -> list[object]:
+        return [Paragraph(title, subhead_style), data_table(headers, rows)]
+
+    def findings_rows(findings: dict[str, Any]) -> dict[str, list[list[object]]]:
+        missing_rows = [
+            [item["column"], item["pandas_dtype"], item["missing_count"],
+             f"{item['missing_percentage']:.1f}%", item["severity"], item["explanation"]]
+            for item in findings["missing"]["columns"]
+        ]
+        duplicate_rows = [
+            [item["column"], item["missing_count"], item["duplicate_value_count"],
+             f"{item['uniqueness_percentage']:.1f}%"]
+            for item in findings["duplicates"]["identifier_candidates"]
+        ]
+        category_rows = [
+            [group["column"], group["normalized_value"],
+             "; ".join(f"{item['value']} ({item['count']})" for item in group["variants"])]
+            for group in findings["categories"]["variant_groups"]
+        ]
+        outlier_rows = [
+            [item["column"], item["outlier_count"], f"{item['outlier_percentage']:.1f}%",
+             f"{item['q1']:.3g}", f"{item['median']:.3g}", f"{item['q3']:.3g}",
+             f"{item['lower_bound']:.3g}", f"{item['upper_bound']:.3g}"]
+            for item in findings["outliers"]["columns"]
+        ]
+        structure = findings["structure"]
+        structural_rows = (
+            [[column, "Empty column"] for column in structure["empty_columns"]]
+            + [[item["column"], "Constant column"] for item in structure["constant_columns"]]
+            + [[item["column"], f"High-cardinality text ({item['uniqueness_percentage']:.1f}% unique)"] for item in structure["high_cardinality_columns"]]
+            + [[item["column"], f"Possible identifier ({item['duplicate_value_count']} repeated values)"] for item in structure["identifier_columns"]]
+            + [[item["column"], f"{item['negative_count']} negative; {item['zero_percentage']:.1f}% zeros"] for item in structure["numeric_patterns"] if item["negative_count"] or item["zero_percentage"] >= 80]
+        )
+        return {
+            "missing": missing_rows,
+            "identifiers": duplicate_rows,
+            "categories": category_rows,
+            "outliers": outlier_rows,
+            "structure": structural_rows,
+        }
+
+    score = original_findings["score"]
+    score_text = "Not assessable" if score["score"] is None else f"{score['score']} / 100 · {score['band']}"
+    story: list[object] = []
+    guardian: object = Paragraph("TALOS Guardian", small_style)
+    if guardian_image:
+        try:
+            from PIL import Image as PILImage
+
+            panel = PILImage.open(BytesIO(guardian_image)).convert("RGB")
+            panel.thumbnail((480, 180), PILImage.Resampling.LANCZOS)
+            compact_image = BytesIO()
+            panel.save(compact_image, format="JPEG", quality=82, optimize=True)
+            compact_image.seek(0)
+            guardian = Image(compact_image, width=135, height=52, kind="proportional", hAlign="RIGHT")
+        except Exception:
+            guardian = Paragraph("TALOS Guardian", small_style)
+    hero_left = Paragraph(
+        "TALOS Inspection Report<br/>"
+        "<font size='8' color='#E8DEFF'>A watchful guardian between source data and trusted analysis.</font><br/>"
+        f"<font size='7' color='#E1BF78'>Source: {plain(profile.get('file_name', 'dataset.csv'))}</font>",
+        title_style,
+    )
+    hero = Table(
+        [[hero_left, guardian]],
+        colWidths=[available_width - 150, 145],
+    )
+    hero.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#111017")),
+                ("BOX", (0, 0), (-1, -1), 1, bronze),
+                ("LINEABOVE", (0, 0), (-1, 0), 2, colors.HexColor("#C39A5A")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
+    story.extend([hero, Spacer(1, 7)])
+    story.append(Paragraph("Source profile", section_style))
+    profile_meta = [
+        ["Filename", profile.get("file_name", "")],
+        ["File size", profile.get("file_size", "")],
+        ["Rows", profile.get("row_count", 0)],
+        ["Columns", profile.get("column_count", 0)],
+        ["Report created", created_at],
+    ]
+    story.append(data_table(["Field", "Value"], profile_meta))
+    story.extend(table_section(
+        "Column structure", ["Column", "Pandas type", "TALOS type"],
+        [[item["column"], item["pandas_dtype"], item["talos_type"]] for item in profile.get("columns", [])],
+    ))
+
+    def append_score_and_findings(label: str, findings: dict[str, Any]) -> None:
+        finding_score = findings["score"]
+        text = "Not assessable" if finding_score["score"] is None else f"{finding_score['score']} / 100 · {finding_score['band']}"
+        story.append(Paragraph(label, section_style))
+        story.append(Paragraph(f"Dataset Integrity Score: {plain(text)}", ParagraphStyle("TalosScore", parent=body_style, fontName="Helvetica-Bold", fontSize=14, textColor=bronze, leading=17)))
+        story.append(Paragraph(plain(finding_score.get("explanation", "")), small_style))
+        story.extend(table_section(
+            "Score components", ["Component", "Weight", "Component score", "Weighted points"],
+            _score_rows(findings),
+        ))
+        rows = findings_rows(findings)
+        story.extend(table_section("Missing values", ["Column", "Pandas type", "Missing", "Missing %", "Severity", "Possible effect"], rows["missing"]))
+        duplicates = findings["duplicates"]
+        story.append(Paragraph(
+            f"Exact duplicate rows: {duplicates['exact_duplicate_row_count']} ({duplicates['exact_duplicate_percentage']:.1f}% of rows).",
+            body_style,
+        ))
+        story.extend(table_section("Identifier signals", ["Possible identifier", "Missing", "Repeated values", "Uniqueness"], rows["identifiers"]))
+        story.extend(table_section("Category variants", ["Column", "Normalized form", "Observed variants"], rows["categories"]))
+        story.extend(table_section("Numeric outliers", ["Column", "Outliers", "Outlier %", "Q1", "Median", "Q3", "Lower IQR bound", "Upper IQR bound"], rows["outliers"]))
+        story.extend(table_section("Structural and numeric signals", ["Column", "Signal"], rows["structure"]))
+
+    append_score_and_findings("Original dataset inspection", original_findings)
+    append_score_and_findings("Current working-copy inspection", working_findings)
+
+    comparison_rows = [
+        ["Rows", original_summary["row_count"], working_summary["row_count"]],
+        ["Columns", original_summary["column_count"], working_summary["column_count"]],
+        ["Missing cells", original_summary["missing_cells"], working_summary["missing_cells"]],
+        ["Exact duplicate rows", original_summary["duplicate_rows"], working_summary["duplicate_rows"]],
+        ["Category variant groups", original_summary.get("category_variant_groups", 0), working_summary.get("category_variant_groups", 0)],
+        ["IQR outlier values", original_summary.get("outlier_values", 0), working_summary.get("outlier_values", 0)],
+        ["Empty columns", original_summary.get("empty_columns", 0), working_summary.get("empty_columns", 0)],
+        ["Integrity score", original_summary.get("score", "Not assessable"), working_summary.get("score", "Not assessable")],
+    ]
+    story.append(Paragraph("Original and working-copy comparison", section_style))
+    story.append(data_table(["Measure", "Original", "Working copy"], comparison_rows))
+
+    story.append(Paragraph("Transformation Ledger", section_style))
+    if ledger:
+        ledger_rows = [
+            [
+                item.get("transformation_type", ""), item.get("column", ""),
+                item.get("affected_rows", 0), item.get("description", ""),
+                json.dumps(item.get("parameters", {}), ensure_ascii=False, default=str),
+                json.dumps(item.get("before_after", []), ensure_ascii=False, default=str),
+            ]
+            for item in ledger
+        ]
+        story.append(data_table(
+            ["Transformation", "Column", "Affected rows", "Description", "Parameters", "Before and after"],
+            ledger_rows,
+        ))
+    else:
+        story.append(Paragraph("No transformations were approved. The working copy matches the original.", body_style))
+
+    for label, tables in (
+        ("Original row-level evidence", original_evidence_tables),
+        ("Working-copy row-level evidence", working_evidence_tables),
+    ):
+        if not tables:
+            continue
+        story.append(Paragraph(label, section_style))
+        for filename in ("duplicate_rows.csv", "outliers.csv"):
+            frame = tables.get(filename)
+            if frame is None or frame.empty:
+                continue
+            count = min(50, len(frame.index))
+            story.append(Paragraph(filename.replace("_", " ").removesuffix(".csv"), subhead_style))
+            story.append(data_table(list(frame.columns.astype(str)), frame.head(count).values.tolist()))
+            if len(frame.index) > count:
+                story.append(Paragraph(
+                    f"Showing {count:,} of {len(frame.index):,} evidence rows. The complete CSV is available in the Evidence Vault ZIP.",
+                    small_style,
+                ))
+
+    story.append(Paragraph("Limitations", section_style))
+    for note in (
+        "Findings are contextual signals. TALOS does not understand the business meaning of a field.",
+        "Outliers are not automatically errors; possible identifiers are inferred from column names.",
+        "The Dataset Integrity Score is a custom TALOS heuristic, not an industry-standard quality measure.",
+        "Approved transformations affect a separate working copy. The original uploaded dataset remains unchanged.",
+    ):
+        story.append(Paragraph("• " + plain(note), body_style))
+
+    def draw_page(canvas: Any, document: Any) -> None:
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#111017"))
+        canvas.rect(0, page_height - 10 * mm, page_width, 10 * mm, fill=1, stroke=0)
+        canvas.setFillColor(colors.HexColor("#E1BF78"))
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawString(left_margin, page_height - 6.5 * mm, "TALOS  ·  INSPECTION REPORT")
+        canvas.setStrokeColor(line)
+        canvas.line(left_margin, 10 * mm, page_width - right_margin, 10 * mm)
+        canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 7)
+        canvas.drawString(left_margin, 6 * mm, "Original data preserved · Findings require contextual review")
+        canvas.drawRightString(page_width - right_margin, 6 * mm, f"Page {document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    return buffer.getvalue()

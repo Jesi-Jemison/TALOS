@@ -169,6 +169,46 @@ def test_demo_mode_uses_standard_upload_inspection_pipeline_and_can_clear():
     assert "talos_original_df" not in app.session_state
 
 
+def test_text_normalisation_requires_approval_and_updates_only_the_working_copy():
+    csv = b"status\nopen\nOPEN\nclosed\n"
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("status.csv", csv, "text/csv")).run()
+
+    original = app.session_state["talos_original_df"].copy(deep=True)
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    app.selectbox(key="talos_text_global_rule").select("UPPERCASE").run()
+    assert not app.exception
+    assert "Repair Plan" in {item.value for item in app.subheader}
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    assert app.session_state["talos_transformation_ledger"] == []
+
+    app.button(key="talos-apply-selected-repairs").click().run()
+    assert not app.exception
+    assert app.session_state["talos_original_df"]["status"].tolist() == [
+        "open", "OPEN", "closed"
+    ]
+    assert app.session_state["talos_working_df"]["status"].tolist() == [
+        "OPEN", "OPEN", "CLOSED"
+    ]
+    assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["operation"] == "normalize_text"
+
+
+def test_optional_pdf_is_prepared_on_demand_and_appears_in_downloads():
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.button(key="talos-load-demo").click().run()
+
+    assert app.session_state.get("talos_cached_report_pdf") is None
+    app.button(key="prepare-inspection-report-pdf").click().run()
+
+    assert not app.exception
+    pdf = app.session_state["talos_cached_report_pdf"]
+    assert pdf.startswith(b"%PDF-")
+    assert app.session_state["talos_cached_report_pdf_revision"] == app.session_state[
+        "talos_data_revision"
+    ]
+    assert app.download_button(key="download-inspection-report-pdf").label == "Download PDF report"
+
+
 def test_category_variant_group_can_be_selected_and_applied_alone():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.button(key="talos-load-demo").click().run()

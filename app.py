@@ -40,15 +40,19 @@ from src.theme import DEFAULT_THEME, theme_token_css, theme_tokens
 from src.reporting import (
     build_cleaned_csv,
     build_export_filename,
+    build_inspection_report_pdf,
     build_inspection_report_html,
     build_transformation_log,
 )
 from src.transformations import (
+    TEXT_NORMALISATION_RULES,
     append_ledger_record,
     apply_transformations,
+    build_text_normalisation_plan,
     build_repair_plan,
     build_suggested_transformations,
     create_working_copy,
+    recommend_text_normalisation_columns,
     reset_working_copy,
 )
 
@@ -827,11 +831,21 @@ def clear_repair_widget_state() -> None:
             del st.session_state[key]
         elif key.startswith("talos_repair_group_"):
             st.session_state[key] = False
+        elif key.startswith("talos_text_"):
+            del st.session_state[key]
 
 
 def invalidate_export_cache() -> None:
     """Discard session-generated exports after the working copy changes."""
-    for key in ("talos_cached_report_html", "talos_cached_report_revision", "talos_cached_evidence_pack", "talos_cached_evidence_revision"):
+    for key in (
+        "talos_cached_report_html",
+        "talos_cached_report_pdf",
+        "talos_cached_report_pdf_error",
+        "talos_cached_report_revision",
+        "talos_cached_report_pdf_revision",
+        "talos_cached_evidence_pack",
+        "talos_cached_evidence_revision",
+    ):
         st.session_state.pop(key, None)
 
 
@@ -887,6 +901,236 @@ def repair_selection_key(repair_id: str) -> str:
     """Build a stable, compact Streamlit key for a repair suggestion."""
     digest = hashlib.sha256(repair_id.encode("utf-8")).hexdigest()[:16]
     return f"talos_repair_select_{digest}"
+
+
+def text_widget_key(kind: str, column: str, value: str = "") -> str:
+    """Build stable keys for bounded per-column and per-value controls."""
+    digest = hashlib.sha256(f"{kind}\0{column}\0{value}".encode("utf-8")).hexdigest()[:16]
+    return f"talos_text_{kind}_{digest}"
+
+
+def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | None:
+    """Render a preview-first lexical plan and return its approved action proposal."""
+    with st.expander("Text Normalisation", expanded=False):
+        st.markdown("Set the house style, then make exceptions where the data demands them.")
+        st.caption("TALOS will alter only the working copy. Nothing changes until you approve the Repair Plan.")
+
+        all_text_columns = [
+            str(column)
+            for column, series in working_df.items()
+            if len(series.dropna())
+            and series.dropna().map(lambda value: isinstance(value, str)).all()
+        ]
+        recommended = recommend_text_normalisation_columns(working_df)
+        advanced = st.checkbox(
+            "Show all text columns, including names, free text, identifiers, and high-cardinality fields",
+            key="talos_text_advanced_columns",
+            help="These fields are excluded from recommendations. Select them only when you intend to change their text.",
+        )
+        if advanced:
+            options = all_text_columns
+            if any(column not in recommended for column in all_text_columns):
+                st.warning("Advanced columns may contain names, codes, URLs, or free text. Review the preview carefully.")
+        else:
+            options = recommended
+            st.caption("TALOS recommends short categorical fields. Names, identifiers, URLs, and free text are not recommended.")
+
+        selection_key = "talos_text_selected_columns"
+        if selection_key not in st.session_state:
+            st.session_state[selection_key] = list(recommended)
+        st.session_state[selection_key] = [
+            column for column in st.session_state[selection_key] if column in options
+        ]
+        selected_columns = st.multiselect(
+            "Apply to text columns",
+            options=options,
+            key=selection_key,
+            help="Only selected columns are included in the lexical repair plan.",
+        )
+        high_cardinality = [
+            column for column in selected_columns
+            if int(working_df[column].nunique(dropna=True)) > 1000
+        ]
+        if high_cardinality:
+            st.warning(
+                "High-cardinality columns require the advanced opt-in. TALOS summarizes their preview and keeps value exceptions paged."
+            )
+
+        global_rule = st.selectbox(
+            "Default text style",
+            TEXT_NORMALISATION_RULES,
+            key="talos_text_global_rule",
+        )
+        whitespace_cols = st.columns(3)
+        trim_leading = whitespace_cols[0].checkbox("Trim leading whitespace", key="talos_text_trim_leading")
+        trim_trailing = whitespace_cols[1].checkbox("Trim trailing whitespace", key="talos_text_trim_trailing")
+        collapse_spaces = whitespace_cols[2].checkbox(
+            "Collapse repeated spaces", key="talos_text_collapse_spaces"
+        )
+
+        column_rules: dict[str, str] = {}
+        with st.expander("Column-level rules", expanded=False):
+            if not selected_columns:
+                st.caption("Select one or more columns to set column-level rules.")
+            for column in selected_columns:
+                key = text_widget_key("column_rule", column)
+                selection = st.selectbox(
+                    f"Rule for {column}",
+                    ["Use global default", *TEXT_NORMALISATION_RULES],
+                    key=key,
+                )
+                if selection != "Use global default":
+                    column_rules[column] = selection
+
+        overrides: dict[str, dict[str, dict[str, str]]] = st.session_state.get(
+            "talos_text_value_overrides", {}
+        )
+        enable_value_rules = st.checkbox(
+            "Add individual value exceptions",
+            key="talos_text_enable_value_rules",
+            help="Rules are shown for unique values, 20 at a time, with search and paging for large columns.",
+        )
+        if enable_value_rules:
+            for column in selected_columns:
+                value_counts = working_df[column].value_counts(dropna=True, sort=False)
+                string_counts = {
+                    str(value): int(count)
+                    for value, count in value_counts.items()
+                    if isinstance(value, str) and int(count) > 0
+                }
+                values = sorted(string_counts, key=lambda item: (item.casefold(), item))
+                with st.expander(f"{column} · {len(values):,} distinct text values", expanded=False):
+                    if len(values) > 1000:
+                        st.warning(
+                            "This is a high-cardinality column. TALOS limits the editor to 20 unique values per page; use search to find a specific value."
+                        )
+                    search_key = text_widget_key("value_search", column)
+                    query = st.text_input("Filter unique values", key=search_key).casefold()
+                    filtered_values = [value for value in values if query in value.casefold()]
+                    page_count = max(1, (len(filtered_values) + 19) // 20)
+                    page_key = text_widget_key("value_page", column)
+                    if page_key in st.session_state:
+                        st.session_state[page_key] = min(
+                            max(1, int(st.session_state[page_key])), page_count
+                        )
+                    else:
+                        st.session_state[page_key] = 1
+                    page = st.number_input(
+                        "Mapping page",
+                        min_value=1,
+                        max_value=page_count,
+                        step=1,
+                        key=page_key,
+                    )
+                    start = (int(page) - 1) * 20
+                    page_values = filtered_values[start : start + 20]
+                    if not page_values:
+                        st.caption("No values match this filter.")
+                    for value in page_values:
+                        prior = overrides.get(column, {}).get(value, {"mode": "default"})
+                        row = st.columns([2, 1, 1])
+                        row[0].write(f"{value} · {string_counts[value]} rows")
+                        mode_key = text_widget_key("value_mode", column, value)
+                        modes = ["Use inherited rule", "Use another rule", "Custom canonical value"]
+                        mode_index = {
+                            "default": 0,
+                            "rule": 1,
+                            "custom": 2,
+                        }.get(prior.get("mode", "default"), 0)
+                        if mode_key not in st.session_state:
+                            st.session_state[mode_key] = modes[mode_index]
+                        mode = row[1].selectbox(
+                            "Value handling",
+                            modes,
+                            key=mode_key,
+                            label_visibility="collapsed",
+                        )
+                        if mode == "Use another rule":
+                            rule_key = text_widget_key("value_rule", column, value)
+                            current_rule = prior.get("rule", global_rule)
+                            if rule_key not in st.session_state:
+                                st.session_state[rule_key] = (
+                                    current_rule if current_rule in TEXT_NORMALISATION_RULES else global_rule
+                                )
+                            chosen_rule = row[2].selectbox(
+                                "Value rule",
+                                TEXT_NORMALISATION_RULES,
+                                key=rule_key,
+                                label_visibility="collapsed",
+                            )
+                            overrides.setdefault(column, {})[value] = {
+                                "mode": "rule",
+                                "rule": chosen_rule,
+                            }
+                        elif mode == "Custom canonical value":
+                            custom_key = text_widget_key("value_custom", column, value)
+                            if custom_key not in st.session_state:
+                                st.session_state[custom_key] = prior.get("value", "")
+                            custom_value = row[2].text_input(
+                                "Custom canonical value",
+                                key=custom_key,
+                                label_visibility="collapsed",
+                            )
+                            overrides.setdefault(column, {})[value] = {
+                                "mode": "custom",
+                                "value": custom_value,
+                            }
+                        else:
+                            overrides.get(column, {}).pop(value, None)
+                if not overrides.get(column):
+                    overrides.pop(column, None)
+        st.session_state["talos_text_value_overrides"] = overrides
+        active_overrides = overrides if enable_value_rules else {}
+
+        if not selected_columns:
+            st.info("Choose a text column to prepare a preview.")
+            return None
+        try:
+            plan = build_text_normalisation_plan(
+                working_df,
+                global_rule,
+                selected_columns,
+                column_rules=column_rules,
+                value_overrides=active_overrides,
+                trim_leading=trim_leading,
+                trim_trailing=trim_trailing,
+                collapse_internal_spaces=collapse_spaces,
+                preview_limit=100,
+            )
+        except (TypeError, ValueError) as error:
+            st.error(f"TALOS could not prepare the text-normalisation preview: {error}")
+            return None
+
+        metrics = st.columns(4)
+        metrics[0].metric("Distinct values changed", f"{plan['values_affected']:,}")
+        metrics[1].metric("Rows affected", f"{plan['rows_affected']:,}")
+        metrics[2].metric("Columns", len(plan["selected_columns"]))
+        metrics[3].metric("Manual overrides", f"{plan['override_count']:,}")
+        st.markdown("**TALOS has prepared a lexical repair plan.**")
+        st.caption("Nothing changes until you approve it. Rule order: value exception → column rule → global rule.")
+        st.markdown(f"**Default:** {global_rule}")
+        st.markdown("**Columns:** " + ", ".join(plan["selected_columns"]))
+        active_whitespace = [
+            label
+            for label, enabled in (
+                ("Trim leading", trim_leading),
+                ("Trim trailing", trim_trailing),
+                ("Collapse repeated spaces", collapse_spaces),
+            )
+            if enabled
+        ]
+        st.markdown("**Whitespace:** " + (", ".join(active_whitespace) if active_whitespace else "unchanged"))
+        if not plan["preview"].empty:
+            preview_limit = 25 if any(working_df[column].nunique(dropna=True) > 1000 for column in selected_columns) else 100
+            render_dataframe(plan["preview"].head(preview_limit), width="stretch", hide_index=True)
+            if plan["values_affected"] > preview_limit:
+                st.caption(f"Showing {preview_limit} representative mappings; {plan['values_affected']:,} distinct values would change.")
+        else:
+            st.caption("The selected rules currently produce no text changes.")
+
+        if not plan["values_affected"]:
+            return None
+        return {"type": "normalize_text", "label": "Text normalisation", "plan": plan}
 
 
 def _selection_callback(repair_ids: tuple[str, ...], selected: bool) -> None:
@@ -1237,6 +1481,10 @@ def render_repair_control_center(
                 action["label"] = f"Remove empty column · {column}"
                 selected_actions.append(action)
 
+    text_action = render_text_normalisation(working_df)
+    if text_action is not None:
+        selected_actions.append(text_action)
+
     if not selected_actions:
         st.info("Select one or more repairs to prepare a Repair Plan. Nothing changes yet.")
         return
@@ -1263,6 +1511,32 @@ def render_repair_control_center(
     for action, record in zip(selected_actions, plan["records"]):
         with st.expander(f"Preview · {action.get('label', action['type'])}", expanded=False):
             st.write(record["description"])
+            if action.get("type") == "normalize_text":
+                text_plan = action["plan"]
+                st.markdown("**Text Normalisation**")
+                st.markdown(f"Default: {text_plan['global_rule']}")
+                st.markdown("Columns: " + ", ".join(text_plan["selected_columns"]))
+                st.markdown(
+                    "Whitespace: "
+                    + (
+                        ", ".join(
+                            name.replace("_", " ")
+                            for name, enabled in text_plan["whitespace"].items()
+                            if enabled
+                        )
+                        or "unchanged"
+                    )
+                )
+                details = st.columns(3)
+                details[0].metric("Distinct values", text_plan["values_affected"])
+                details[1].metric("Rows affected", text_plan["rows_affected"])
+                details[2].metric("Manual overrides", text_plan["override_count"])
+                if not text_plan["preview"].empty:
+                    render_dataframe(
+                        text_plan["preview"].head(25),
+                        width="stretch",
+                        hide_index=True,
+                    )
             summary = st.columns(3)
             summary[0].metric("Affected rows", record["affected_rows"])
             summary[1].metric("Rows after", record["rows_after"])
@@ -1582,6 +1856,16 @@ def load_emblem_svg() -> str:
         return ""
 
 
+def load_guardian_image() -> bytes | None:
+    """Read the compact panel art for the optional PDF report, if available."""
+    image_path = Path(__file__).parent / "assets" / "talos-sentinel-panel.webp"
+    try:
+        return image_path.read_bytes()
+    except OSError:
+        logger.warning("TALOS guardian artwork was not available for the PDF report at %s", image_path)
+        return None
+
+
 def render_detailed_evidence_exports(
     source_filename: str,
     original_tables: dict[str, pd.DataFrame],
@@ -1727,7 +2011,7 @@ def render_exports_and_report(
         st.session_state["talos_cached_report_revision"] = revision
     report_html = st.session_state["talos_cached_report_html"]
 
-    downloads = st.columns(3)
+    downloads = st.columns(4)
     with downloads[0]:
         st.download_button(
             "Download cleaned CSV",
@@ -1753,6 +2037,45 @@ def render_exports_and_report(
             mime="text/html",
             key="download-inspection-report",
         )
+    with downloads[3]:
+        cached_pdf = st.session_state.get("talos_cached_report_pdf")
+        pdf_is_current = st.session_state.get("talos_cached_report_pdf_revision") == revision
+        if cached_pdf and pdf_is_current:
+            st.download_button(
+                "Download PDF report",
+                data=cached_pdf,
+                file_name=build_export_filename(str(original_profile["file_name"]), "pdf_report"),
+                mime="application/pdf",
+                key="download-inspection-report-pdf",
+            )
+        else:
+            if st.button("Prepare PDF report", key="prepare-inspection-report-pdf"):
+                try:
+                    with st.spinner("Preparing the PDF inspection report."):
+                        report_pdf = build_inspection_report_pdf(
+                            original_profile,
+                            original_findings,
+                            working_findings,
+                            original_summary,
+                            working_summary,
+                            ledger,
+                            guardian_image=load_guardian_image(),
+                            original_evidence_tables=original_tables,
+                            working_evidence_tables=working_tables,
+                            created_at=str(st.session_state.get("talos_cached_report_created_at", "")),
+                        )
+                    st.session_state["talos_cached_report_pdf"] = report_pdf
+                    st.session_state["talos_cached_report_pdf_revision"] = revision
+                    st.session_state.pop("talos_cached_report_pdf_error", None)
+                except Exception:
+                    logger.exception("Could not prepare the optional TALOS PDF report.")
+                    st.session_state["talos_cached_report_pdf_error"] = (
+                        "The PDF report could not be prepared in this session. The self-contained HTML report remains available."
+                    )
+                st.rerun()
+        pdf_error = st.session_state.get("talos_cached_report_pdf_error")
+        if pdf_error:
+            st.caption(str(pdf_error))
 
     table_descriptions = {
         "structure.csv": "Column names, pandas dtypes, and TALOS types.",
@@ -1776,6 +2099,10 @@ def render_exports_and_report(
                 "inspection_report.html": "Complete, self-contained TALOS inspection dossier.",
                 "cleaned_dataset.csv": "The user-approved working copy, exported without a DataFrame index.",
             }
+            cached_pdf = st.session_state.get("talos_cached_report_pdf")
+            if cached_pdf and st.session_state.get("talos_cached_report_pdf_revision") == revision:
+                pack_files["inspection_report.pdf"] = cached_pdf
+                descriptions["inspection_report.pdf"] = "Structured, printable PDF copy of the TALOS inspection dossier."
             for filename, table in original_tables.items():
                 pack_files[filename] = table.to_csv(index=False).encode("utf-8")
                 descriptions[filename] = table_descriptions.get(filename, "Original inspection evidence table.")

@@ -11,12 +11,16 @@ from src.quality_checks import (
     inspect_structure,
 )
 from src.transformations import (
+    TEXT_NORMALISATION_RULES,
     append_ledger_record,
     apply_transformation,
     apply_transformations,
     build_repair_plan,
+    build_text_normalisation_plan,
     build_suggested_transformations,
     create_working_copy,
+    normalize_text_value,
+    recommend_text_normalisation_columns,
     reset_working_copy,
 )
 
@@ -30,6 +34,108 @@ def inspect_all(df):
         "outliers": inspect_numeric_outliers(df),
         "structure": inspect_structure(df),
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "rule", "expected"),
+    [
+        ("North Shore", "Leave unchanged", "North Shore"),
+        ("North Shore", "lowercase", "north shore"),
+        ("North Shore", "UPPERCASE", "NORTH SHORE"),
+        ("north shore", "Proper Case", "North Shore"),
+        ("nORTH sHORE", "Sentence case", "North shore"),
+        ("north SHORE", "camelCase", "northShore"),
+        ("North Shore", "snake_case", "north_shore"),
+    ],
+)
+def test_text_normalisation_rules_are_deterministic(value, rule, expected):
+    assert rule in TEXT_NORMALISATION_RULES
+    assert normalize_text_value(value, rule) == expected
+
+
+def test_text_normalisation_whitespace_options_are_independent_and_nontext_is_preserved():
+    assert normalize_text_value("  North   Shore  ", trim_leading=True) == "North   Shore  "
+    assert normalize_text_value("  North   Shore  ", trim_trailing=True) == "  North   Shore"
+    assert normalize_text_value("North   Shore", collapse_internal_spaces=True) == "North Shore"
+    assert normalize_text_value(123, "UPPERCASE", trim_leading=True) == 123
+
+
+def test_text_plan_precedence_preview_counts_and_approved_copy_preserve_source():
+    original = pd.DataFrame(
+        {"status": ["  blue  sky  ", "BLUE", "Blue", "other", None]}
+    )
+    source_copy = original.copy(deep=True)
+    plan = build_text_normalisation_plan(
+        original,
+        "lowercase",
+        ["status"],
+        column_rules={"status": "UPPERCASE"},
+        value_overrides={
+            "status": {
+                "BLUE": {"mode": "custom", "value": "Preferred"},
+                "Blue": {"mode": "rule", "rule": "Sentence case"},
+            }
+        },
+        trim_leading=True,
+        trim_trailing=True,
+        collapse_internal_spaces=True,
+    )
+
+    assert plan["canonical_values"]["status"] == {
+        "  blue  sky  ": "BLUE SKY",
+        "BLUE": "Preferred",
+        "Blue": "Blue",
+        "other": "OTHER",
+    }
+    assert plan["values_affected"] == 3
+    assert plan["cells_changed"] == 3
+    assert plan["rows_affected"] == 3
+    assert plan["manual_override_count"] == 2
+    assert len(plan["preview"]) == 3
+    pd.testing.assert_frame_equal(original, source_copy)
+
+    working, record = apply_transformation(
+        original, {"type": "normalize_text", "plan": plan}
+    )
+    assert working["status"].tolist() == ["BLUE SKY", "Preferred", "Blue", "OTHER", None]
+    assert record["affected_rows"] == 3
+    assert record["affected_cells"] == 3
+    assert record["parameters"]["selected_columns"] == ["status"]
+    assert record["parameters"]["manual_override_count"] == 2
+    assert len(record["before_after"]) == 3
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_text_plan_requires_selected_columns_and_supported_rules():
+    original = pd.DataFrame({"status": ["Open", "closed"]})
+    with pytest.raises(ValueError, match="Unknown text column"):
+        build_text_normalisation_plan(original, "lowercase", ["missing"])
+    with pytest.raises(ValueError, match="supported text rule"):
+        build_text_normalisation_plan(
+            original, "lowercase", ["status"], column_rules={"status": "bad rule"}
+        )
+
+
+def test_text_recommendations_skip_identifiers_and_long_uncontrolled_values():
+    df = pd.DataFrame(
+        {
+            "region": ["North", "north", "South"],
+            "customer_name": ["Ari", "Bea", "Cam"],
+            "record_id": ["a1", "a2", "a3"],
+            "notes": ["short", "text", "here"],
+        }
+    )
+    assert recommend_text_normalisation_columns(df) == ["region"]
+
+
+def test_text_normalisation_high_cardinality_plan_scales_linearly_in_row_count():
+    values = [f"Customer-{index:05d}" for index in range(25_000)]
+    original = pd.DataFrame({"label": values})
+    plan = build_text_normalisation_plan(original, "lowercase", ["label"], preview_limit=20)
+
+    assert plan["values_affected"] == 25_000
+    assert plan["rows_affected"] == 25_000
+    assert len(plan["preview"]) == 20
 
 
 def test_whitespace_normalization_trims_and_collapses_without_changing_source():
