@@ -6,7 +6,13 @@ import hashlib
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app import build_guardian_summary, build_header_visual_html, inspect_dataset, repair_selection_key
+from app import (
+    build_guardian_summary,
+    build_header_visual_html,
+    inspect_dataset,
+    outlier_widget_key,
+    repair_selection_key,
+)
 from src.transformations import build_suggested_transformations
 
 
@@ -23,6 +29,8 @@ def test_landing_keeps_the_upload_demo_path_and_guardian_identity():
         'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in item.value
         for item in app.markdown
     )
+    assert any("Raw data enters. Nothing passes unchecked." in item.value for item in app.markdown)
+    assert any("GUARDIAN ACTIVE" in item.value for item in app.markdown)
 
 
 def test_selected_repairs_require_approval_reinspect_and_reset():
@@ -304,11 +312,11 @@ def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
     findings = inspect_dataset(demo)
     summary = {item["area"]: item for item in build_guardian_summary(findings)}
 
-    assert "3 columns contain missing values" in summary["Missing values"]["message"]
-    assert "may be intentional" in summary["Duplicates & identifiers"]["message"]
+    assert "3 fields contain missing values" in summary["Missing values"]["message"]
+    assert "review the matches before removal" in summary["Duplicates & identifiers"]["message"]
     assert "7 category variant groups" in summary["Category consistency"]["message"]
     assert "31 values fall" in summary["Numeric distribution"]["message"]
-    assert "not automatically defects" in summary["Structure"]["message"]
+    assert "cannot determine their intended role" in summary["Structure"]["message"]
     assert summary["Missing values"]["status"] == "Significant finding"
     assert summary["Duplicates & identifiers"]["status"] == "Review recommended"
     assert summary["Numeric distribution"]["status"] == "Observation"
@@ -317,6 +325,83 @@ def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
         "Review recommended",
         "Significant finding",
     }
+
+
+def test_manual_column_removal_waits_for_approval_reinspects_and_can_reset():
+    rows = [f"r{index},note {index},{index}" for index in range(10)]
+    csv = ("record_id,notes,amount\n" + "\n".join(rows) + "\n").encode()
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("manual-columns.csv", csv, "text/csv")).run()
+    original = app.session_state["talos_original_df"].copy(deep=True)
+
+    assert app.multiselect(key="talos_manual_column_remove").value == []
+    app.multiselect(key="talos_manual_column_remove").set_value(["notes", "record_id"]).run()
+    assert not app.exception
+    assert app.session_state["talos_working_df"].columns.tolist() == ["record_id", "notes", "amount"]
+    assert app.session_state["talos_transformation_ledger"] == []
+    assert any(item.value == "Repair Plan" for item in app.subheader)
+    assert any("Current columns: 3" in item.value and "After repair: 1 column" in item.value for item in app.markdown)
+
+    app.button(key="talos-apply-selected-repairs").click().run()
+    assert not app.exception
+    assert app.session_state["talos_working_df"].columns.tolist() == ["amount"]
+    assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["columns_removed"] == ["notes", "record_id"]
+    assert app.session_state["talos_working_findings"]["structure"] == inspect_dataset(app.session_state["talos_working_df"])["structure"]
+    pd.testing.assert_frame_equal(app.session_state["talos_original_df"], original)
+
+    app.button(key="reset-working-copy").click().run()
+    app.button(key="confirm-reset").click().run()
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    assert app.session_state["talos_transformation_ledger"] == []
+
+
+def test_column_removal_refuses_to_remove_every_field():
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("two-columns.csv", b"left,right\na,b\nc,d\n", "text/csv")).run()
+    app.multiselect(key="talos_manual_column_remove").set_value(["left", "right"]).run()
+    assert not app.exception
+    assert any("Keep at least one column" in alert.value for alert in app.error)
+    assert app.session_state["talos_working_df"].columns.tolist() == ["left", "right"]
+    assert app.session_state["talos_transformation_ledger"] == []
+
+
+def test_outlier_remediation_per_column_requires_approval_and_reinspects():
+    values = list(range(1, 11)) + [100, 200]
+    csv = ("amount,volume\n" + "\n".join(f"{value},{value * 2}" for value in values) + "\n").encode()
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("outliers.csv", csv, "text/csv")).run()
+    original = app.session_state["talos_original_df"].copy(deep=True)
+    assert app.session_state["talos_original_findings"]["outliers"]["total_outlier_values"] == 4
+
+    assert app.selectbox(key=outlier_widget_key("amount")).value == "Leave unchanged"
+    app.selectbox(key=outlier_widget_key("amount")).select("Replace with median").run()
+    assert not app.exception
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    assert app.session_state["talos_transformation_ledger"] == []
+    assert any("5.5" in item.value for item in app.markdown)
+    assert any(item.value == "Repair Plan" for item in app.subheader)
+
+    app.button(key="talos-apply-selected-repairs").click().run()
+    assert not app.exception
+    assert app.session_state["talos_working_df"]["amount"].tolist()[-2:] == [5.5, 5.5]
+    assert app.session_state["talos_working_findings"]["outliers"]["total_outlier_values"] == 2
+    assert all(
+        item["column"] != "amount" or item["outlier_count"] == 0
+        for item in app.session_state["talos_working_findings"]["outliers"]["columns"]
+    )
+    assert any(
+        item["column"] == "volume" and item["outlier_count"] == 2
+        for item in app.session_state["talos_working_findings"]["outliers"]["columns"]
+    )
+    record = app.session_state["talos_transformation_ledger"][-1]
+    assert record["parameters"]["operation"] == "remediate_outliers"
+    assert record["parameters"]["columns"][0]["strategy"] == "median"
+    pd.testing.assert_frame_equal(app.session_state["talos_original_df"], original)
+
+    app.button(key="reset-working-copy").click().run()
+    app.button(key="confirm-reset").click().run()
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    assert app.session_state["talos_transformation_ledger"] == []
 
 
 def test_guardian_summary_reports_a_clean_dataset_without_false_findings():

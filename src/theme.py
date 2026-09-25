@@ -1,4 +1,4 @@
-"""Small, testable colour-token definitions for the TALOS interface."""
+"""TALOS v1.1.1 session colour tokens for the Streamlit interface."""
 
 from __future__ import annotations
 
@@ -26,6 +26,9 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
         "talos-hero-start": "#191720",
         "talos-hero-end": "#111017",
         "talos-score-surface": "#211B26",
+        "talos-alert-bg": "#191720",
+        "talos-alert-text": "#E8DEFF",
+        "talos-alert-line": "#C39A5A",
     },
     "Light": {
         "color-scheme": "light",
@@ -45,6 +48,9 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
         "talos-hero-start": "#E8E0D1",
         "talos-hero-end": "#F3EEE4",
         "talos-score-surface": "#EFE7DA",
+        "talos-alert-bg": "#F6F1E8",
+        "talos-alert-text": "#322417",
+        "talos-alert-line": "#896337",
     },
 }
 

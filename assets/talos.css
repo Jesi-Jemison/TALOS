@@ -1,3 +1,4 @@
+/* TALOS v1.1.1 interface tokens and theme-aware component styling. */
 :root {
     color-scheme: dark;
     --talos-bg: #09080C;
@@ -16,6 +17,9 @@
     --talos-hero-start: #191720;
     --talos-hero-end: #111017;
     --talos-score-surface: #211B26;
+    --talos-alert-bg: #191720;
+    --talos-alert-text: #E8DEFF;
+    --talos-alert-line: #C39A5A;
 }
 
 html, body, [data-testid="stAppViewContainer"], .stApp {
@@ -239,19 +243,66 @@ body, .stApp {
     background: var(--talos-panel);
 }
 
-[data-testid="stAlert"], [data-testid="stExpander"] {
+[data-testid="stDataFrame"] [data-testid="stToolbar"],
+[data-testid="stDataFrame"] [data-testid="stElementToolbar"] {
+    background: var(--talos-panel-raised) !important;
+    color: var(--talos-text) !important;
+}
+
+[data-testid="stAlert"] {
+    border: 1px solid var(--talos-alert-line) !important;
+    border-left-width: 3px !important;
+    border-radius: 9px;
+    background: var(--talos-alert-bg) !important;
+    color: var(--talos-alert-text) !important;
+}
+
+[data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *,
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] li,
+[data-testid="stAlert"] strong,
+[data-testid="stAlert"] span {
+    color: var(--talos-alert-text) !important;
+    opacity: 1 !important;
+}
+
+[data-testid="stAlert"] a {
+    color: var(--talos-violet) !important;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+[data-testid="stExpander"] {
     border-color: var(--talos-line);
     border-radius: 9px;
 }
 
-[data-testid="stExpander"] summary {
+[data-testid="stExpander"] details > summary,
+[data-testid="stExpander"] details > summary p,
+[data-testid="stExpander"] details > summary span,
+[data-testid="stExpander"] details > summary svg {
     color: var(--talos-text);
     font-weight: 620;
     letter-spacing: 0.01em;
 }
 
-[data-testid="stExpander"] summary:hover {
-    background: var(--talos-highlight);
+[data-testid="stExpander"] details > summary:hover {
+    background: var(--talos-highlight) !important;
+}
+
+[data-testid="stExpander"] details > summary:focus-visible {
+    outline: 3px solid var(--talos-lilac) !important;
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+[data-testid="stExpander"] details[open] > summary {
+    border-bottom: 1px solid var(--talos-line);
+}
+
+[data-testid="stExpander"] details[open] > div {
+    background: var(--talos-panel);
 }
 
 [data-testid="stVerticalBlockBorderWrapper"] {
@@ -273,6 +324,12 @@ body, .stApp {
 [data-testid="stRadio"] label,
 [data-testid="stCheckbox"] label {
     color: var(--talos-text);
+}
+
+[data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] * {
+    color: var(--talos-muted) !important;
+    opacity: 1 !important;
 }
 
 [data-testid="stTextInput"] input,

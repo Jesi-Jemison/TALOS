@@ -1,10 +1,16 @@
 # TALOS
 
-**A watchful guardian that inspects data before it is trusted.**
+**Raw data enters. Nothing passes unchecked.**
 
-**Current release: v1.1.0 — Streamlit app and standalone Python interface.**
+**Current release: v1.1.1 — Streamlit Forge controls and report polish.**
+
+This patch follows the repository's existing v1.1.0 release. The supplied
+brief labels this work v1.0.3; the version stays monotonic with the code
+already on `main`.
 
 [Open the live Streamlit app](https://talos-app.streamlit.app/) · [View the source](https://github.com/Jesi-Jemison/TALOS)
+
+Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 TALOS is a Python data-inspection application inspired by the bronze automaton guardian of Greek mythology. It profiles a CSV, explains quality signals, and lets a person prepare and approve repairs to a separate working copy. The uploaded source stays untouched.
 
@@ -38,9 +44,10 @@ The appearance preference is session-level and leaves the inspection state intac
 - Inspects missingness, exact duplicate rows, category variation, IQR outliers, possible identifiers, empty and constant columns, high-cardinality text, and numeric patterns.
 - Calculates an explainable, custom **Dataset Integrity Score** with visible components and weights.
 - Offers granular, user-selected repairs in **The Forge**. Each selection becomes a previewable Repair Plan before anything is applied.
+- Lets users remove selected fields and choose an IQR response per numeric column: leave unchanged, blank, non-outlier mean or median, custom value, remove affected rows, or cap to the nearest IQR boundary.
 - Reinspects the working copy after approval, compares it with the source, and records each operation in a transformation ledger.
-- Exports result tables as CSV, a cleaned working copy, the ledger, printable HTML and PDF reports, and a ZIP evidence pack.
-- Provides session-level dark and light themes.
+- Keeps the PDF concise and aggregate-focused; detailed row evidence remains available in the HTML report, CSV exports, and ZIP Evidence Pack.
+- Provides session-level dark and light themes with readable alerts, tables, captions, and expandable sections.
 
 ## The workflow
 
@@ -105,13 +112,31 @@ Core modules do not depend on Streamlit or session state.
 
 ## Run locally
 
+Use Python 3.10 or newer. These steps start the Streamlit product from a fresh
+clone.
+
 ```bash
 git clone https://github.com/Jesi-Jemison/TALOS.git
 cd TALOS
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 streamlit run app.py
+```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. From
+Command Prompt, use `.venv\Scripts\activate.bat`. Once Streamlit starts, open
+the local URL it prints, usually `http://localhost:8501`. Choose **Load TALOS
+demo dataset** to try an inspection and approved repair, or upload a UTF-8 CSV.
+Stop the server with **Ctrl+C** in its terminal. To use another port, run
+`streamlit run app.py --server.port 8502`.
+
+To run the complete tests, install the test-only PDF reader and run pytest:
+
+```bash
+python -m pip install -r requirements-test.txt
+python -m pytest -q
 ```
 
 ## Use TALOS
@@ -160,12 +185,6 @@ python talos_cli.py inspect my_data.csv --output output/talos
 The CLI is read only: preview and apply transformations from Python with
 `TalosSession.preview(...)` and `TalosSession.apply(...)`.
 
-Run the test suite with:
-
-```bash
-python -m pytest -q
-```
-
 ## Privacy and limitations
 
 Uploaded CSV bytes, source and working DataFrames, findings, report HTML, and ledger are held in the active Streamlit session. TALOS does not intentionally save uploaded data to persistent storage, use a database, create user accounts, or send telemetry. Avoid uploading confidential, sensitive, or personally identifiable information.
@@ -174,7 +193,8 @@ TALOS reads CSV files only. Its rules do not infer business context, enforce a s
 
 ## Project status
 
-The Streamlit product and standalone Python interface are implemented: intake,
-profiling, inspection, scoring, controlled repair, reinspection, evidence
-exports, theme preferences, and the CLI. TALOS is a testable example of pandas
-analysis and a review-first data-cleaning workflow.
+The Streamlit product and the separately released Python/CLI interfaces are
+implemented. This v1.1.1 update adds per-column outlier remediation, manual
+column removal, clearer light-mode surfaces, and a concise PDF report. TALOS
+remains a review-first workflow and does not infer business meaning or certify
+that a dataset is ready for analysis.

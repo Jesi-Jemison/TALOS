@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pandas as pd
 
@@ -260,3 +261,127 @@ def test_pdf_report_is_generated_as_a_printable_standalone_document():
 
     assert pdf.startswith(b"%PDF-")
     assert len(pdf) < 1_000_000
+
+
+def test_pdf_is_an_aggregate_report_with_dynamic_summary_repairs_and_guardian_header():
+    from pypdf import PdfReader
+
+    original, findings, profile, summary = build_report_inputs()
+    working = original.drop(columns=["empty_field", "status"]).copy(deep=True)
+    working_findings = build_findings(working)
+    working_summary = {
+        **summary,
+        "column_count": len(working.columns),
+        "missing_cells": working_findings["missing"]["total_missing_cells"],
+        "duplicate_rows": working_findings["duplicates"]["exact_duplicate_row_count"],
+        "score": working_findings["score"]["score"],
+    }
+    ledger = [
+        {
+            "transformation_type": "Remove selected columns",
+            "column": "empty_field, status",
+            "action": "Remove selected columns",
+            "affected_rows": 0,
+            "parameters": {
+                "operation": "remove_columns",
+                "columns_removed": ["empty_field", "status"],
+                "columns_removed_count": 2,
+            },
+            "before_after": [],
+        },
+        {
+            "transformation_type": "IQR outlier remediation",
+            "column": "sales, score",
+            "action": "IQR outlier remediation",
+            "affected_rows": 1,
+            "parameters": {
+                "operation": "remediate_outliers",
+                "columns": [
+                    {"column": "sales", "strategy": "median", "outlier_count": 1},
+                    {"column": "score", "strategy": "blank", "outlier_count": 2},
+                ],
+            },
+            "before_after": [],
+        },
+    ]
+    evidence = {
+        "outliers.csv": pd.DataFrame(
+            {"Column": ["sales"], "Source row (1-based)": [987654321], "Value": ["ROW-LEVEL-PRIVATE-MARKER"]}
+        ),
+        "duplicate_rows.csv": pd.DataFrame(
+            {"Source row (1-based)": [123456789], "Value": ["ANOTHER-ROW-MARKER"]}
+        ),
+    }
+    pdf = build_inspection_report_pdf(
+        profile,
+        findings,
+        working_findings,
+        summary,
+        working_summary,
+        ledger,
+        guardian_image=(Path(__file__).parent.parent / "assets/talos-sentinel-panel.webp").read_bytes(),
+        original_evidence_tables=evidence,
+        working_evidence_tables=evidence,
+        created_at="2026-09-25T00:00:00+00:00",
+    )
+    reader = PdfReader(BytesIO(pdf))
+    text = " ".join(" ".join((page.extract_text() or "").split()) for page in reader.pages)
+
+    assert pdf.startswith(b"%PDF-")
+    assert len(reader.pages) >= 2
+    assert reader.pages[0].images
+    assert "Inspection Summary" in text
+    assert "TALOS inspected 10 rows across 5 columns" in text
+    assert "user-approved transformation" in text
+    assert "Integrity Score changed from" in text
+    assert "Repairs Applied" in text
+    assert "Remaining Signals" in text
+    assert "2 selected columns removed" in text
+    assert "1 sales IQR values replaced with non-outlier median" in text
+    assert "Detailed Aggregate Findings" in text
+    assert "Minor Observations" not in text
+    assert "ROW-LEVEL-PRIVATE-MARKER" not in text
+    assert "ANOTHER-ROW-MARKER" not in text
+    assert "987654321" not in text
+
+
+def test_pdf_without_repairs_says_the_working_copy_matches_the_source():
+    from pypdf import PdfReader
+
+    original, findings, profile, summary = build_report_inputs()
+    pdf = build_inspection_report_pdf(
+        profile,
+        findings,
+        findings,
+        summary,
+        summary,
+        [],
+        created_at="2026-09-25T00:00:00+00:00",
+    )
+    text = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(BytesIO(pdf)).pages)
+    assert "No transformations were applied" in text
+    assert "working copy remains identical to the original source" in text
+
+
+def test_pdf_ignores_large_row_level_evidence_tables():
+    from pypdf import PdfReader
+
+    original, findings, profile, summary = build_report_inputs()
+    many_rows = pd.DataFrame(
+        {"Source row (1-based)": range(1, 1001), "Value": ["ROW-DETAIL"] * 1000}
+    )
+    pdf = build_inspection_report_pdf(
+        profile,
+        findings,
+        findings,
+        summary,
+        summary,
+        [],
+        original_evidence_tables={"outliers.csv": many_rows},
+        working_evidence_tables={"duplicate_rows.csv": many_rows},
+        created_at="2026-09-25T00:00:00+00:00",
+    )
+    text = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(BytesIO(pdf)).pages)
+    assert len(pdf) < 1_000_000
+    assert "ROW-DETAIL" not in text
+    assert "1000" not in text

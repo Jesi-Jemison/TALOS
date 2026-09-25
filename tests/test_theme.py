@@ -1,5 +1,7 @@
 """Tests for TALOS's compact, session-independent theme token system."""
 
+from pathlib import Path
+
 import pytest
 
 from src.theme import (
@@ -41,6 +43,20 @@ def test_body_and_muted_text_meet_readable_contrast_in_both_themes():
         tokens = theme_tokens(name)
         assert _contrast(tokens["talos-text"], tokens["talos-bg"]) >= 7
         assert _contrast(tokens["talos-muted"], tokens["talos-panel"]) >= 4.5
+
+
+def test_alert_surfaces_keep_readable_text_and_component_overrides():
+    stylesheet = (Path(__file__).parent.parent / "assets" / "talos.css").read_text(
+        encoding="utf-8"
+    )
+    for name in THEME_TOKENS:
+        tokens = theme_tokens(name)
+        assert _contrast(tokens["talos-alert-text"], tokens["talos-alert-bg"]) >= 7
+        assert "--talos-alert-bg" in theme_token_css(name)
+    assert '[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *' in stylesheet
+    assert '[data-testid="stExpander"] details > summary:focus-visible' in stylesheet
+    assert '[data-testid="stDataFrame"] [data-testid="stToolbar"]' in stylesheet
+    assert "color: var(--talos-alert-text) !important" in stylesheet
 
 
 def test_theme_tokens_are_copied_and_invalid_names_are_rejected():

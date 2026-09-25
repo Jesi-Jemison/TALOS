@@ -1,3 +1,3 @@
-"""Shared Python core for TALOS."""
+"""Shared TALOS core; the Streamlit Forge and report polish release is v1.1.1."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"

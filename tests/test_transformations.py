@@ -16,6 +16,7 @@ from src.transformations import (
     apply_transformation,
     apply_transformations,
     build_repair_plan,
+    build_outlier_remediation_plan,
     build_text_normalisation_plan,
     build_suggested_transformations,
     create_working_copy,
@@ -318,6 +319,12 @@ def test_empty_column_removal_requires_an_actually_empty_column():
             original, {"type": "remove_empty_column", "column": "value"}
         )
 
+    with pytest.raises(ValueError, match="At least one dataset column"):
+        apply_transformation(
+            pd.DataFrame({"empty": [None, None]}),
+            {"type": "remove_empty_column", "column": "empty"},
+        )
+
 
 def test_suggestions_follow_findings_and_do_not_fix_contextual_signals():
     df = pd.DataFrame(
@@ -423,4 +430,180 @@ def test_batch_failure_returns_no_partial_frame_and_keeps_source_untouched():
     with pytest.raises(ValueError, match="completely empty"):
         apply_transformations(original, actions)
 
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_user_selected_columns_preview_remove_only_chosen_fields_and_preserve_source():
+    original = pd.DataFrame({"legacy": ["x", "y"], "notes": ["keep", "these"], "amount": [1, 2]})
+    source_copy = original.copy(deep=True)
+    plan = build_repair_plan(original, [{"type": "remove_columns", "columns": ["legacy", "amount"]}])
+    assert list(plan["preview_df"].columns) == ["notes"]
+    assert plan["estimated_columns_removed"] == 2
+    assert plan["estimated_rows_removed"] == 0
+    pd.testing.assert_frame_equal(original, source_copy)
+
+    working, records = apply_transformations(
+        original,
+        [{"type": "remove_columns", "columns": ["legacy", "amount"], "label": "Remove selected columns"}],
+    )
+    assert list(working.columns) == ["notes"]
+    assert records[0]["parameters"]["columns_removed"] == ["legacy", "amount"]
+    assert records[0]["parameters"]["columns_before"] == 3
+    assert records[0]["parameters"]["columns_after"] == 1
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+@pytest.mark.parametrize("columns", [[], ["a", "b"]])
+def test_user_selected_column_removal_requires_a_selection_and_keeps_one_column(columns):
+    with pytest.raises(ValueError, match="Select at least one|At least one dataset column"):
+        apply_transformation(pd.DataFrame({"a": [1], "b": [2]}), {"type": "remove_columns", "columns": columns})
+
+
+def test_user_selected_column_removal_rejects_stale_column_names():
+    with pytest.raises(ValueError, match="no longer exist"):
+        apply_transformation(pd.DataFrame({"a": [1], "b": [2]}), {"type": "remove_columns", "columns": ["missing"]})
+
+
+def _outlier_frame():
+    return pd.DataFrame({
+        "amount": list(range(1, 11)) + [100, 200],
+        "volume": list(range(2, 22, 2)) + [200, 400],
+        "label": [f"r{index}" for index in range(12)],
+    })
+
+
+def test_outlier_leave_unchanged_is_the_default_and_creates_no_action():
+    original = _outlier_frame()
+    source_copy = original.copy(deep=True)
+    plan = build_outlier_remediation_plan(original, {"amount": {"strategy": "leave"}})
+    assert plan["column_actions"] == []
+    assert plan["affected_values"] == 0
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+@pytest.mark.parametrize(("strategy", "expected"), [("mean", 5.5), ("median", 5.5)])
+def test_outlier_mean_and_median_use_only_finite_non_outlier_values(strategy, expected):
+    original = _outlier_frame()
+    source_copy = original.copy(deep=True)
+    plan = build_outlier_remediation_plan(original, {"amount": {"strategy": strategy}})
+    action = plan["column_actions"][0]
+    assert action["outlier_count"] == 2
+    assert action["replacement_value"] == expected
+    assert action["lower_bound"] < action["upper_bound"]
+    assert action["examples"][0]["before"] == 100
+    assert action["examples"][0]["after"] == expected
+    working, record = apply_transformation(original, {"type": "remediate_outliers", "plan": plan})
+    assert working["amount"].tolist()[-2:] == [expected, expected]
+    assert record["parameters"]["columns"][0]["strategy"] == strategy
+    assert record["parameters"]["columns"][0]["replacement_value"] == expected
+    assert record["before_after"][0]["column"] == "amount"
+    assert record["before_after"][0]["row_position"] > 0
+    pd.testing.assert_frame_equal(original, source_copy)
+
+    nullable = _outlier_frame()
+    nullable["amount"] = nullable["amount"].astype("Int64")
+    nullable_plan = build_outlier_remediation_plan(
+        nullable, {"amount": {"strategy": strategy}}
+    )
+    nullable_result, _ = apply_transformation(
+        nullable, {"type": "remediate_outliers", "plan": nullable_plan}
+    )
+    assert nullable_result["amount"].tolist()[-2:] == [expected, expected]
+    assert nullable_result["amount"].dtype.name == "Float64"
+
+
+def test_outlier_blank_uses_missing_values_and_preserves_nullable_numeric_dtype():
+    original = _outlier_frame()
+    original["amount"] = original["amount"].astype("Int64")
+    source_copy = original.copy(deep=True)
+    plan = build_outlier_remediation_plan(original, {"amount": {"strategy": "blank"}})
+    working, record = apply_transformation(original, {"type": "remediate_outliers", "plan": plan})
+    assert working["amount"].dtype == "Int64"
+    assert working["amount"].isna().sum() == 2
+    assert record["parameters"]["affected_values"] == 2
+    pd.testing.assert_frame_equal(original, source_copy)
+
+    native_integers = _outlier_frame()
+    plan = build_outlier_remediation_plan(
+        native_integers, {"amount": {"strategy": "blank"}}
+    )
+    blanked, _ = apply_transformation(
+        native_integers, {"type": "remediate_outliers", "plan": plan}
+    )
+    assert blanked["amount"].dtype.name == "Int64"
+    assert blanked["amount"].isna().sum() == 2
+
+
+def test_outlier_custom_value_is_validated_and_per_column_strategies_can_differ():
+    original = _outlier_frame()
+    source_copy = original.copy(deep=True)
+    plan = build_outlier_remediation_plan(original, {
+        "amount": {"strategy": "custom", "value": 0},
+        "volume": {"strategy": "blank"},
+    })
+    working, record = apply_transformation(original, {"type": "remediate_outliers", "plan": plan})
+    assert working["amount"].tolist()[-2:] == [0, 0]
+    assert working["volume"].isna().sum() == 2
+    assert [item["strategy"] for item in record["parameters"]["columns"]] == ["custom", "blank"]
+    pd.testing.assert_frame_equal(original, source_copy)
+    with pytest.raises(ValueError, match="finite"):
+        build_outlier_remediation_plan(original, {"amount": {"strategy": "custom", "value": float("nan")}})
+
+
+def test_outlier_row_removal_unions_overlapping_rows_with_duplicate_index_labels():
+    original = _outlier_frame()
+    original.index = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 10]
+    source_copy = original.copy(deep=True)
+    plan = build_outlier_remediation_plan(original, {
+        "amount": {"strategy": "remove_rows"},
+        "volume": {"strategy": "remove_rows"},
+    })
+    assert plan["affected_values"] == 4
+    assert plan["unique_rows_removed"] == 2
+    assert plan["overlap_rows_removed"] == 2
+    assert plan["preview_shape"] == [10, 3]
+    working, record = apply_transformation(original, {"type": "remediate_outliers", "plan": plan})
+    assert len(working) == 10
+    assert not working["amount"].isin([100, 200]).any()
+    assert record["parameters"]["unique_rows_removed"] == 2
+    assert record["parameters"]["overlap_rows_removed"] == 2
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_outlier_capping_uses_the_nearest_iqr_boundary():
+    original = _outlier_frame()
+    plan = build_outlier_remediation_plan(original, {"amount": {"strategy": "cap"}})
+    upper = plan["column_actions"][0]["upper_bound"]
+    working, record = apply_transformation(original, {"type": "remediate_outliers", "plan": plan})
+    assert working["amount"].tolist()[-2:] == [upper, upper]
+    assert record["parameters"]["columns"][0]["replacement_method"] == "nearest IQR boundary"
+
+
+def test_combined_outlier_column_plan_reports_union_shape_reinspection_ledger_and_reset():
+    from src.workflow import inspect_dataset
+
+    original = _outlier_frame()
+    source_copy = original.copy(deep=True)
+    outlier_plan = build_outlier_remediation_plan(original, {
+        "amount": {"strategy": "remove_rows"},
+        "volume": {"strategy": "remove_rows"},
+    })
+    actions = [
+        {"type": "remediate_outliers", "plan": outlier_plan},
+        {"type": "remove_columns", "columns": ["label"]},
+    ]
+    plan = build_repair_plan(original, actions)
+    assert plan["estimated_rows_removed"] == 2
+    assert plan["estimated_columns_removed"] == 1
+    assert plan["preview_df"].shape == (10, 2)
+    assert plan["estimated_values_changed"] == 4
+    pd.testing.assert_frame_equal(original, source_copy)
+
+    working, records = apply_transformations(original, actions)
+    ledger = append_ledger_record(append_ledger_record([], records[0]), records[1])
+    findings = inspect_dataset(working)
+    assert findings["outliers"]["total_outlier_values"] == 0
+    assert ledger[0]["parameters"]["columns"][0]["lower_bound"] is not None
+    assert ledger[1]["parameters"]["columns_removed"] == ["label"]
+    pd.testing.assert_frame_equal(reset_working_copy(original), source_copy)
     pd.testing.assert_frame_equal(original, source_copy)

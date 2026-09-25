@@ -1,4 +1,4 @@
-"""Suggested, copy-returning dataset transformations for the TALOS Forge."""
+"""TALOS v1.1.1 copy-returning repairs and approved transformation records."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import (
     is_bool_dtype,
+    is_extension_array_dtype,
+    is_integer_dtype,
     is_numeric_dtype,
     is_object_dtype,
     is_string_dtype,
@@ -27,6 +29,10 @@ TEXT_NORMALISATION_RULES = (
     "camelCase",
     "snake_case",
 )
+
+OUTLIER_REMEDIATION_STRATEGIES = {
+    "blank", "mean", "median", "custom", "remove_rows", "cap",
+}
 
 _RISKY_TEXT_COLUMN = re.compile(
     r"(?:^|[_\W])(name|email|e-mail|url|uri|website|link|identifier|id|uuid|guid|"
@@ -284,6 +290,7 @@ def build_repair_plan(
         "consolidate_category",
         "fill_numeric_missing",
         "fill_text_missing",
+        "remediate_outliers",
     }
     affected_column_names: list[str] = []
     for action in actions:
@@ -292,11 +299,23 @@ def build_repair_plan(
             affected_column_names.extend(
                 str(column) for column in text_columns
             )
+        elif action.get("type") == "remove_columns":
+            affected_column_names.extend(str(column) for column in action.get("columns", []))
+        elif action.get("type") == "remediate_outliers":
+            affected_column_names.extend(
+                str(item["column"])
+                for item in action.get("plan", {}).get("column_actions", [])
+            )
         else:
             affected_column_names.append(str(action.get("column") or "All columns"))
     affected_columns = list(dict.fromkeys(affected_column_names))
     return {
-        "selected_count": len(actions),
+        "selected_count": sum(
+            int(action.get("plan", {}).get("selected_count", 1))
+            if action.get("type") == "remediate_outliers"
+            else 1
+            for action in actions
+        ),
         "affected_columns": affected_columns,
         "estimated_values_changed": sum(
             int(record.get("parameters", {}).get("affected_values", record["affected_rows"]))
@@ -447,6 +466,233 @@ def _safe_value(value: object) -> object:
     if pd.isna(value):
         return "(missing)"
     return value.item() if hasattr(value, "item") else value
+
+
+def build_outlier_remediation_plan(
+    df: pd.DataFrame,
+    strategies: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Prepare explicit IQR actions per column without mutating the frame.
+
+    Mean and median use only finite, non-outlier observations. Row positions
+    are tracked internally so duplicate DataFrame index labels cannot inflate
+    or duplicate the row-removal estimate.
+    """
+    from src.quality_checks import inspect_numeric_outliers
+
+    findings = inspect_numeric_outliers(df)
+    eligible = {item["column"]: item for item in findings["columns"]}
+    column_actions: list[dict[str, Any]] = []
+    removal_positions: set[int] = set()
+    affected_positions: set[int] = set()
+    affected_values = 0
+
+    for column, choice in strategies.items():
+        strategy = str(choice.get("strategy", "leave"))
+        if strategy == "leave":
+            continue
+        if column not in eligible or column not in df.columns:
+            raise ValueError(f"{column!r} is not an eligible IQR outlier column.")
+        if strategy not in OUTLIER_REMEDIATION_STRATEGIES:
+            raise ValueError(f"Unsupported outlier strategy: {strategy!r}.")
+
+        finding = eligible[column]
+        series = df[column]
+        values = pd.to_numeric(series, errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        )
+        finite = np.isfinite(values)
+        lower = float(finding["lower_bound"])
+        upper = float(finding["upper_bound"])
+        mask = finite & ((values < lower) | (values > upper))
+        positions = np.flatnonzero(mask)
+        if not len(positions):
+            continue
+
+        replacement: float | None = None
+        replacement_method = ""
+        non_outliers = values[finite & ~mask]
+        if strategy in {"mean", "median"}:
+            if not len(non_outliers):
+                raise ValueError(
+                    f"No finite non-outlier values are available for {strategy} replacement in {column!r}."
+                )
+            replacement = float(
+                np.mean(non_outliers) if strategy == "mean" else np.median(non_outliers)
+            )
+            replacement_method = strategy
+        elif strategy == "custom":
+            raw_value = choice.get("value")
+            if isinstance(raw_value, (bool, np.bool_)):
+                raise ValueError("A custom outlier replacement must be numeric, not boolean.")
+            try:
+                replacement = float(raw_value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"Enter a numeric replacement value for {column!r}.") from error
+            if not math.isfinite(replacement):
+                raise ValueError("A custom outlier replacement must be finite.")
+            replacement_method = "custom"
+        elif strategy == "cap":
+            replacement_method = "nearest IQR boundary"
+
+        selected_positions = {int(position) for position in positions}
+        affected_positions.update(selected_positions)
+        if strategy == "remove_rows":
+            removal_positions.update(selected_positions)
+        affected_values += len(positions)
+
+        if strategy == "cap":
+            replacements = [
+                lower if values[position] < lower else upper
+                for position in positions[:5]
+            ]
+        elif replacement is not None:
+            replacements = [replacement] * min(5, len(positions))
+        elif strategy == "blank":
+            replacements = ["(missing)"] * min(5, len(positions))
+        else:
+            replacements = ["(row removed)"] * min(5, len(positions))
+        examples = [
+            {
+                "column": str(column),
+                "row_position": int(position) + 1,
+                "before": _safe_value(series.iloc[position]),
+                "after": after,
+            }
+            for position, after in zip(positions[:5], replacements)
+        ]
+        column_actions.append(
+            {
+                "column": str(column),
+                "strategy": strategy,
+                "outlier_count": int(len(positions)),
+                "outlier_percentage": float(finding["outlier_percentage"]),
+                "lower_bound": lower,
+                "upper_bound": upper,
+                "replacement_method": replacement_method,
+                "replacement_value": replacement,
+                "rows_affected": int(len(positions)),
+                "rows_removed": int(len(positions)) if strategy == "remove_rows" else 0,
+                "examples": examples,
+            }
+        )
+
+    unique_rows_removed = len(removal_positions)
+    return {
+        "column_actions": column_actions,
+        "selected_count": len(column_actions),
+        "affected_values": affected_values,
+        "unique_rows_affected": len(affected_positions),
+        "unique_rows_removed": unique_rows_removed,
+        "overlap_rows_removed": max(
+            0, sum(item["rows_removed"] for item in column_actions) - unique_rows_removed
+        ),
+        "preview_shape": [len(df.index) - unique_rows_removed, len(df.columns)],
+    }
+
+
+def apply_outlier_remediation_plan(
+    df: pd.DataFrame, plan: dict[str, Any]
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Apply an approved multi-column IQR plan to a defensive working copy."""
+    actions = list(plan.get("column_actions", []))
+    if not actions:
+        raise ValueError("The outlier remediation plan has no selected actions.")
+
+    result = df.copy(deep=True)
+    removal_mask = np.zeros(len(df.index), dtype=bool)
+    touched_positions: set[int] = set()
+    aggregate_examples: list[dict[str, Any]] = []
+    total_values = 0
+    ledger_columns: list[dict[str, Any]] = []
+
+    for item in actions:
+        column = item["column"]
+        if column not in df.columns:
+            raise ValueError(f"Column {column!r} no longer exists.")
+        series = df[column]
+        values = pd.to_numeric(series, errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        )
+        lower = float(item["lower_bound"])
+        upper = float(item["upper_bound"])
+        mask = np.isfinite(values) & ((values < lower) | (values > upper))
+        positions = np.flatnonzero(mask)
+        if len(positions) != int(item["outlier_count"]):
+            raise ValueError(
+                f"The IQR findings for {column!r} changed after the plan was prepared. Review the plan again."
+            )
+        touched_positions.update(int(position) for position in positions)
+        strategy = item["strategy"]
+        total_values += len(positions)
+
+        if strategy == "remove_rows":
+            removal_mask[positions] = True
+        elif strategy == "blank":
+            if is_extension_array_dtype(series.dtype):
+                result[column] = series.mask(mask, pd.NA)
+            elif is_integer_dtype(series.dtype):
+                result[column] = series.convert_dtypes().mask(mask, pd.NA)
+            else:
+                result[column] = series.astype("float64").mask(mask, np.nan)
+        elif strategy in {"mean", "median", "custom"}:
+            replacement = float(item["replacement_value"])
+            if not math.isfinite(replacement):
+                raise ValueError("Outlier replacement values must be finite.")
+            if is_integer_dtype(series.dtype) and not replacement.is_integer():
+                result[column] = series.astype("Float64").mask(mask, replacement)
+            else:
+                result[column] = series.mask(mask, replacement)
+        elif strategy == "cap":
+            capped = values.copy()
+            capped[mask & (values < lower)] = lower
+            capped[mask & (values > upper)] = upper
+            result[column] = pd.Series(capped, index=series.index, name=series.name)
+        else:
+            raise ValueError(f"Unsupported outlier strategy: {strategy!r}.")
+
+        examples = deepcopy(item.get("examples", []))
+        if len(aggregate_examples) < 10:
+            aggregate_examples.extend(examples[: 10 - len(aggregate_examples)])
+        ledger_columns.append(
+            {
+                key: item.get(key)
+                for key in (
+                    "column", "strategy", "outlier_count", "outlier_percentage",
+                    "lower_bound", "upper_bound", "replacement_method", "replacement_value",
+                    "rows_affected", "rows_removed",
+                )
+            }
+        )
+
+    unique_rows_removed = int(removal_mask.sum())
+    for example in aggregate_examples:
+        if removal_mask[int(example["row_position"]) - 1]:
+            example["after"] = "(row removed by selected IQR action)"
+    if unique_rows_removed:
+        result = result.iloc[np.flatnonzero(~removal_mask)].copy(deep=True)
+
+    record = _ledger_record(
+        {
+            "type": "remediate_outliers",
+            "column": ", ".join(item["column"] for item in actions),
+        },
+        df,
+        result,
+        len(touched_positions),
+        "Applied the approved per-column IQR actions to the working copy.",
+        aggregate_examples,
+        {
+            "columns": ledger_columns,
+            "affected_values": total_values,
+            "unique_rows_removed": unique_rows_removed,
+            "rows_removed_by_column_total": sum(item["rows_removed"] for item in actions),
+            "overlap_rows_removed": max(
+                0, sum(item["rows_removed"] for item in actions) - unique_rows_removed
+            ),
+        },
+    )
+    return result, record
 
 
 def apply_text_normalisation_plan(
@@ -744,6 +990,8 @@ def apply_transformation(
     elif action_type == "remove_empty_column":
         if not df[column].isna().all():
             raise ValueError("Only a completely empty column can be removed by this suggestion.")
+        if len(df.columns) <= 1:
+            raise ValueError("At least one dataset column must remain.")
         result = df.drop(columns=[column]).copy(deep=True)
         record = _ledger_record(
             action,
@@ -754,6 +1002,39 @@ def apply_transformation(
             [{"before": column, "after": "(column removed)"}],
             {"column": column},
         )
+
+    elif action_type == "remove_columns":
+        columns = list(dict.fromkeys(action.get("columns", [])))
+        if not columns:
+            raise ValueError("Select at least one column to remove.")
+        missing_columns = [name for name in columns if name not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                "Column(s) no longer exist: " + ", ".join(map(str, missing_columns))
+            )
+        if len(columns) >= len(df.columns):
+            raise ValueError("At least one dataset column must remain.")
+        result = df.drop(columns=columns).copy(deep=True)
+        record = _ledger_record(
+            action,
+            df,
+            result,
+            0,
+            f"Removed {len(columns)} user-selected column(s) from the working copy.",
+            [{"before": str(name), "after": "(column removed)"} for name in columns[:10]],
+            {
+                "columns_removed": [str(name) for name in columns],
+                "columns_removed_count": len(columns),
+                "columns_before": len(df.columns),
+                "columns_after": len(result.columns),
+            },
+        )
+
+    elif action_type == "remediate_outliers":
+        plan = action.get("plan")
+        if not isinstance(plan, dict) or not plan.get("column_actions"):
+            raise ValueError("A previewed per-column outlier remediation plan is required.")
+        result, record = apply_outlier_remediation_plan(df, plan)
 
     else:
         raise ValueError(f"Unsupported transformation: {action_type!r}.")

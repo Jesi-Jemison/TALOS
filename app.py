@@ -1,4 +1,4 @@
-"""Streamlit interface for TALOS dataset intake and inspection."""
+"""TALOS v1.1.1 Streamlit interface for intake, inspection, and review-first repair."""
 
 import base64
 import hashlib
@@ -43,6 +43,7 @@ from src.transformations import (
     apply_transformations,
     build_text_normalisation_plan,
     build_repair_plan,
+    build_outlier_remediation_plan,
     build_suggested_transformations,
     create_working_copy,
     recommend_text_normalisation_columns,
@@ -85,6 +86,14 @@ def render_dataframe(table: pd.DataFrame, **kwargs: object) -> None:
                 "props": [
                     ("background-color", tokens["talos-panel-raised"]),
                     ("color", tokens["talos-bronze-strong"]),
+                    ("border-color", tokens["talos-line"]),
+                ],
+            },
+            {
+                "selector": "th.row_heading, th.blank",
+                "props": [
+                    ("background-color", tokens["talos-panel-raised"]),
+                    ("color", tokens["talos-text"]),
                     ("border-color", tokens["talos-line"]),
                 ],
             },
@@ -164,14 +173,15 @@ def render_header() -> None:
         <header class="talos-hero">
             <div class="talos-hero-layout">
                 <div class="talos-hero-copy">
-                    <p class="talos-eyebrow">Data integrity observation system</p>
-                    <h1 class="talos-title"><span class="talos-title-mark">⚙</span> TALOS</h1>
+                    <p class="talos-eyebrow">Guardian protocol · Data inspection</p>
+                    <h1 class="talos-title">TALOS</h1>
                     <p class="talos-subtitle">
-                        A watchful guardian between source data and trusted analysis.
+                        <strong>Raw data enters. Nothing passes unchecked.</strong><br>
+                        TALOS inspects structure, consistency and integrity before data moves downstream.
                     </p>
                     <div class="talos-system-status">
                         <span class="talos-status-dot"></span>
-                        Inspection system online
+                        GUARDIAN ACTIVE
                     </div>
                 </div>
                 {visual_html}
@@ -200,10 +210,11 @@ def build_guardian_summary(
     affected_columns = int(missing["affected_column_count"])
     missing_percentage = float(missing["missing_percentage"])
     if affected_columns:
+        missing_noun = "field" if affected_columns == 1 else "fields"
+        missing_verb = "contains" if affected_columns == 1 else "contain"
         missing_line = (
-            f"{affected_columns} column{'s' if affected_columns != 1 else ''} "
-            f"contain{'s' if affected_columns == 1 else ''} missing values "
-            f"({missing_percentage:.1f}% of all cells)."
+            f"{affected_columns} {missing_noun} {missing_verb} "
+            f"missing values ({missing_percentage:.1f}% of all cells)."
         )
         severity_counts = missing["severity_counts"]
         significant_columns = int(
@@ -212,7 +223,7 @@ def build_guardian_summary(
         if significant_columns:
             missing_line += (
                 f" {significant_columns} column{'s' if significant_columns != 1 else ''} "
-                f"meet{'s' if significant_columns == 1 else ''} TALOS's significant missingness thresholds."
+                f"{'meets' if significant_columns == 1 else 'meet'} TALOS's significant missingness thresholds."
             )
             missing_status = "Significant finding"
         else:
@@ -227,8 +238,8 @@ def build_guardian_summary(
     identifier_candidates = int(duplicates["identifier_candidate_count"])
     if duplicate_count:
         duplicate_line = (
-            f"{duplicate_count} exact duplicate row{'s' if duplicate_count != 1 else ''} "
-            f"appear{'s' if duplicate_count == 1 else ''}; this may be intentional."
+            f"{duplicate_count:,} exact duplicate row{'s' if duplicate_count != 1 else ''} detected; "
+            "review the matches before removal."
         )
         duplicate_status = "Review recommended"
     elif repeated_identifiers:
@@ -252,9 +263,8 @@ def build_guardian_summary(
     checked_category_columns = len(categories["checked_columns"])
     if category_groups:
         category_line = (
-            f"{category_groups} category variant group{'s' if category_groups != 1 else ''} "
-            f"differ{'s' if category_groups == 1 else ''} only by case or spacing; "
-            "review their meaning before consolidating."
+            f"{category_groups:,} category variant group{'s' if category_groups != 1 else ''} detected. "
+            "Review their meaning before consolidating."
         )
         category_status = "Review recommended"
     elif checked_category_columns:
@@ -268,10 +278,10 @@ def build_guardian_summary(
     outlier_count = int(outliers["total_outlier_values"])
     eligible_numeric_columns = int(outliers["eligible_column_count"])
     if outlier_count:
+        outlier_verb = "falls" if outlier_count == 1 else "fall"
         outlier_line = (
-            f"{outlier_count} value{'s' if outlier_count != 1 else ''} "
-            f"fall{'s' if outlier_count == 1 else ''} outside the IQR review range; "
-            "a flag is not proof of an error."
+            f"{outlier_count:,} value{'s' if outlier_count != 1 else ''} {outlier_verb} "
+            "outside the IQR range. An outlier is not automatically an error."
         )
         outlier_status = "Observation"
     elif eligible_numeric_columns:
@@ -283,10 +293,10 @@ def build_guardian_summary(
 
     structural_count = len(build_structural_findings_table(findings["structure"]))
     if structural_count:
+        structural_verb = "remains" if structural_count == 1 else "remain"
         structural_line = (
-            f"{structural_count} contextual structure signal{'s' if structural_count != 1 else ''} "
-            f"{'was' if structural_count == 1 else 'were'} recorded; "
-            "they are not automatically defects."
+            f"{structural_count:,} structural signal{'s' if structural_count != 1 else ''} {structural_verb}. "
+            "TALOS cannot determine their intended role."
         )
         if findings["structure"]["empty_columns"] or findings["structure"]["constant_columns"]:
             structural_status = "Review recommended"
@@ -806,6 +816,12 @@ def clear_repair_widget_state() -> None:
             st.session_state[key] = False
         elif key.startswith("talos_text_"):
             del st.session_state[key]
+        elif key == "talos_manual_column_remove":
+            st.session_state[key] = []
+        elif key.startswith("talos_outlier_strategy_"):
+            st.session_state[key] = "Leave unchanged"
+        elif key.startswith("talos_outlier_custom_"):
+            st.session_state[key] = 0.0
 
 
 def invalidate_export_cache() -> None:
@@ -1136,6 +1152,12 @@ def _clear_repair_callback(repair_ids: tuple[str, ...], missing_columns: tuple[s
     for key in list(st.session_state.keys()):
         if key.startswith("talos_repair_group_"):
             st.session_state[key] = False
+        elif key == "talos_manual_column_remove":
+            st.session_state[key] = []
+        elif key.startswith("talos_outlier_strategy_"):
+            st.session_state[key] = "Leave unchanged"
+        elif key.startswith("talos_outlier_custom_"):
+            st.session_state[key] = 0.0
 
 
 def _canonical_state_key(repair_id: str) -> str:
@@ -1179,6 +1201,192 @@ def _selected_missing_action(
         return None
     action["label"] = f"{selected} · {column}"
     return action
+
+
+def outlier_widget_key(column: str, kind: str = "strategy") -> str:
+    """Return a stable session key for one per-column outlier control."""
+    digest = hashlib.sha256(column.encode("utf-8")).hexdigest()[:16]
+    return f"talos_outlier_{kind}_{digest}"
+
+
+def render_outlier_remediation(
+    working_df: pd.DataFrame, findings: dict[str, dict[str, object]]
+) -> dict[str, object] | None:
+    """Collect explicit per-column IQR choices and show their calculated preview."""
+    eligible_columns = [
+        item for item in findings["outliers"]["columns"] if int(item["outlier_count"])
+    ]
+    with st.expander(
+        f"Outlier remediation · {count_label(int(findings['outliers']['total_outlier_values']), 'flagged value')}",
+        expanded=False,
+    ):
+        st.caption(
+            "An outlier is not automatically an error. Each column defaults to Leave unchanged; "
+            "nothing is changed until you approve the combined Repair Plan."
+        )
+        if not eligible_columns:
+            st.info("No eligible IQR outliers are present in the current working copy.")
+            return None
+
+        labels_to_strategy = {
+            "Leave unchanged": "leave",
+            "Replace with blank / missing": "blank",
+            "Replace with mean": "mean",
+            "Replace with median": "median",
+            "Replace with custom value": "custom",
+            "Remove affected rows": "remove_rows",
+            "Cap to nearest IQR boundary": "cap",
+        }
+        strategy_options = list(labels_to_strategy)
+        choices: dict[str, dict[str, object]] = {}
+        for item in eligible_columns:
+            column = str(item["column"])
+            st.markdown(
+                f"**{column}** · {int(item['outlier_count']):,} values · "
+                f"{float(item['outlier_percentage']):.1f}% of usable values"
+            )
+            st.caption(
+                f"IQR review bounds: {float(item['lower_bound']):,.6g} to "
+                f"{float(item['upper_bound']):,.6g}. These bounds flag values for review; "
+                "they are not business-valid limits."
+            )
+            selected = st.selectbox(
+                f"Action for {column}",
+                strategy_options,
+                key=outlier_widget_key(column),
+            )
+            strategy = labels_to_strategy[selected]
+            choice: dict[str, object] = {"strategy": strategy}
+            if strategy == "custom":
+                choice["value"] = st.number_input(
+                    f"Replacement value for {column}",
+                    value=0.0,
+                    key=outlier_widget_key(column, "custom"),
+                )
+            if strategy != "leave":
+                choices[column] = choice
+
+        if not choices:
+            return None
+        try:
+            plan = build_outlier_remediation_plan(working_df, choices)
+        except (TypeError, ValueError) as error:
+            st.error(f"TALOS could not prepare the outlier preview: {error}")
+            return None
+        st.markdown("**Outlier preview**")
+        st.write(
+            f"{plan['affected_values']:,} flagged values affected · "
+            f"{plan['unique_rows_removed']:,} unique rows to remove"
+            + (
+                f" · {plan['overlap_rows_removed']:,} overlapping row flags counted once"
+                if plan["overlap_rows_removed"]
+                else ""
+            )
+        )
+        for item in plan["column_actions"]:
+            strategy = str(item["strategy"])
+            if strategy in {"mean", "median", "custom"}:
+                st.markdown(
+                    f"**{item['column']}** · {strategy.title()} replacement: "
+                    f"{float(item['replacement_value']):,.6g}"
+                )
+            elif strategy == "cap":
+                st.markdown(f"**{item['column']}** · cap to the nearest IQR boundary")
+            elif strategy == "blank":
+                st.markdown(f"**{item['column']}** · replace flagged values with missing values")
+            else:
+                st.markdown(
+                    f"**{item['column']}** · remove {item['rows_removed']:,} rows "
+                    "(overlaps with other selected columns are counted once)"
+                )
+            examples = pd.DataFrame(item["examples"])
+            if not examples.empty:
+                render_dataframe(
+                    examples.rename(
+                        columns={
+                            "column": "Column",
+                            "before": "Before",
+                            "after": "After",
+                            "row_position": "Row position",
+                        }
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+        return {
+            "type": "remediate_outliers",
+            "label": "IQR outlier remediation",
+            "plan": plan,
+        }
+
+
+def render_manual_column_removal(
+    working_df: pd.DataFrame, findings: dict[str, dict[str, object]]
+) -> dict[str, object] | None:
+    """Let a person remove any selected current-copy fields with a shape preview."""
+    columns = [str(column) for column in working_df.columns]
+    structure = findings["structure"]
+    possible_ids = {
+        str(item.get("column")) for item in structure.get("identifier_columns", [])
+    }
+    high_cardinality = {
+        str(item.get("column")) for item in structure.get("high_cardinality_columns", [])
+    }
+    suggested_columns = [
+        *structure.get("empty_columns", []),
+        *(item["column"] for item in structure.get("constant_columns", [])),
+    ]
+    suggested = [
+        str(column)
+        for column in suggested_columns
+        if str(column) in columns
+    ]
+    with st.expander("Remove columns · user-selected", expanded=False):
+        st.caption(
+            "TALOS cannot know which fields matter to your analysis. Every column is available, "
+            "and none is selected by default."
+        )
+        if suggested:
+            st.caption(
+                "Empty or constant fields to review: "
+                + ", ".join(dict.fromkeys(suggested))
+            )
+        selected_columns = st.multiselect(
+            "Select columns to remove",
+            options=columns,
+            default=[],
+            key="talos_manual_column_remove",
+            help="Only fields selected here are included in the Repair Plan.",
+        )
+        if not selected_columns:
+            return None
+        selected_columns = [str(column) for column in selected_columns]
+        count = len(selected_columns)
+        current_count = len(working_df.columns)
+        st.markdown(
+            f"**Current columns:** {current_count:,}  ·  **Remove:** {count:,}  ·  "
+            f"**Working copy after repair:** {count_label(current_count - count, 'column')}"
+        )
+        risky = set(selected_columns) & (possible_ids | high_cardinality)
+        if risky:
+            st.warning(
+                "TALOS flagged these selected fields as possible identifiers or high-cardinality text: "
+                + ", ".join(sorted(risky))
+                + ". Their business role is unknown; removal remains your choice."
+            )
+        else:
+            st.info(
+                "TALOS cannot safely classify the selected fields' business role. "
+                "Review their use before removal."
+            )
+        if count >= current_count:
+            st.error("Keep at least one column in the working copy. Select fewer columns to continue.")
+            return None
+        return {
+            "type": "remove_columns",
+            "columns": selected_columns,
+            "label": f"Remove {count_label(count, 'selected column')}",
+        }
 
 
 def apply_selected_repairs(actions: tuple[dict[str, object], ...]) -> None:
@@ -1228,6 +1436,9 @@ def render_repair_control_center(
     categories = [item for item in suggestions if item["action"]["type"] == "consolidate_category"]
     duplicates = [item for item in suggestions if item["action"]["type"] == "remove_exact_duplicates"]
     empty_columns = [item for item in suggestions if item["action"]["type"] == "remove_empty_column"]
+    has_outlier_options = any(
+        int(item["outlier_count"]) > 0 for item in findings["outliers"]["columns"]
+    )
     missing_columns = [
         str(column)
         for column in working_df.columns
@@ -1236,10 +1447,10 @@ def render_repair_control_center(
     repair_classes = sum(
         bool(group)
         for group in (whitespace, categories, missing_columns, duplicates, empty_columns)
-    )
+    ) + 1 + int(has_outlier_options)
     st.markdown(
-        f"**{repair_classes} repair classes available · "
-        f"{len(suggestions) + len(missing_columns)} proposed transformations**"
+        f"**{repair_classes} repair areas available · "
+        f"{len(suggestions) + len(missing_columns)} suggested actions**"
     )
 
     all_ids = tuple(str(item["suggestion_id"]) for item in suggestions)
@@ -1438,6 +1649,11 @@ def render_repair_control_center(
                 action["label"] = "Remove exact duplicate rows"
                 selected_actions.append(action)
 
+    outlier_action = render_outlier_remediation(working_df, findings)
+    manual_column_action = render_manual_column_removal(working_df, findings)
+    if manual_column_action is not None:
+        selected_actions.append(manual_column_action)
+
     with st.expander(f"Empty columns · {len(empty_columns)} proposed", expanded=False):
         if not empty_columns:
             st.caption("No completely empty columns are currently suggested for removal.")
@@ -1457,6 +1673,32 @@ def render_repair_control_center(
     text_action = render_text_normalisation(working_df)
     if text_action is not None:
         selected_actions.append(text_action)
+
+    if outlier_action is not None:
+        # Outlier bounds are prepared from this revision of the working copy.
+        # Apply them before any selected action can remove rows or columns.
+        selected_actions.insert(0, outlier_action)
+    manually_removed = set(
+        map(str, (manual_column_action or {}).get("columns", []))
+    )
+    selected_actions = [
+        action
+        for action in selected_actions
+        if not (
+            action.get("type") == "remove_empty_column"
+            and str(action.get("column")) in manually_removed
+        )
+    ]
+    column_removal_actions = [
+        action
+        for action in selected_actions
+        if action.get("type") in {"remove_columns", "remove_empty_column"}
+    ]
+    selected_actions = [
+        action
+        for action in selected_actions
+        if action.get("type") not in {"remove_columns", "remove_empty_column"}
+    ] + column_removal_actions
 
     if not selected_actions:
         st.info("Select one or more repairs to prepare a Repair Plan. Nothing changes yet.")
@@ -1480,10 +1722,59 @@ def render_repair_control_center(
     plan_metrics[3].metric("Rows removed", plan["estimated_rows_removed"])
     plan_metrics[4].metric("Columns removed", plan["estimated_columns_removed"])
     st.caption("Affected fields: " + ", ".join(plan["affected_columns"]))
+    st.markdown(
+        f"**Expected shape:** {len(working_df.index):,} × {len(working_df.columns):,} "
+        f"→ {len(plan['preview_df'].index):,} × {len(plan['preview_df'].columns):,}"
+    )
 
     for action, record in zip(selected_actions, plan["records"]):
         with st.expander(f"Preview · {action.get('label', action['type'])}", expanded=False):
             st.write(record["description"])
+            if action.get("type") == "remove_columns":
+                chosen_columns = list(action["columns"])
+                st.markdown("**Selected columns:** " + ", ".join(map(str, chosen_columns)))
+                st.markdown(
+                    f"Current columns: {len(working_df.columns):,} · Remove: {len(chosen_columns):,} · "
+                    f"After repair: {count_label(len(plan['preview_df'].columns), 'column')}"
+                )
+            elif action.get("type") == "remediate_outliers":
+                outlier_plan = action["plan"]
+                st.markdown("**Per-column IQR actions**")
+                st.caption(
+                    f"{outlier_plan['affected_values']:,} flagged values affected · "
+                    f"{outlier_plan['unique_rows_removed']:,} unique rows removed"
+                    + (
+                        f" · {outlier_plan['overlap_rows_removed']:,} overlapping row flags counted once"
+                        if outlier_plan["overlap_rows_removed"]
+                        else ""
+                    )
+                )
+                for column_action in outlier_plan["column_actions"]:
+                    strategy = str(column_action["strategy"])
+                    detail = (
+                        f"**{column_action['column']}** · {column_action['outlier_count']:,} values "
+                        f"({column_action['outlier_percentage']:.1f}%) · "
+                        f"bounds {column_action['lower_bound']:,.6g} to {column_action['upper_bound']:,.6g} · "
+                        f"{strategy.replace('_', ' ')}"
+                    )
+                    if column_action.get("replacement_value") is not None:
+                        detail += f" · replacement {column_action['replacement_value']:,.6g}"
+                    if strategy == "remove_rows":
+                        detail += f" · {column_action['rows_removed']:,} flagged rows"
+                    st.markdown(detail)
+                    examples = pd.DataFrame(column_action["examples"])
+                    if not examples.empty:
+                        render_dataframe(
+                            examples.rename(
+                                columns={
+                                    "before": "Before",
+                                    "after": "After",
+                                    "row_position": "Row position",
+                                }
+                            ),
+                            width="stretch",
+                            hide_index=True,
+                        )
             if action.get("type") == "normalize_text":
                 text_plan = action["plan"]
                 st.markdown("**Text Normalisation**")
@@ -2275,7 +2566,7 @@ def main() -> None:
     render_forge(original_df, working_df, original_findings, working_findings, source_filename)
     render_exports_and_report(profile, original_findings, working_findings)
     st.markdown(
-        '<p class="talos-footer">Original data preserved · Approved transformations remain in this session.</p>',
+        '<p class="talos-footer">TALOS v1.1.1 · Original data preserved · Approved transformations remain in this session.</p>',
         unsafe_allow_html=True,
     )
 
