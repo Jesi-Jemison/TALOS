@@ -84,8 +84,8 @@ src/
 
 assets/                TALOS CSS, emblem, and demo screenshots
 data/sample/           Synthetic showcase CSV
+docs/                  Scoring, performance, and portfolio notes
 tests/                 Unit and Streamlit flow tests
-  docs/                  Scoring, performance, and portfolio notes
 ```
 
 The analysis is implemented directly with Python, pandas, and NumPy. TALOS does not use a third-party profiling or data-validation framework.
