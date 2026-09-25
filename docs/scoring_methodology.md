@@ -8,7 +8,7 @@ The score ranges from 0 to 100. Higher values mean fewer signals in the checks T
 
 | Component | Weight | Component calculation |
 | --- | ---: | --- |
-| Completeness | 30% | 100 minus the percentage of missing cells across the dataset |
+| Completeness | 30% | 100 minus the average of the dataset's missing-cell percentage and the percentage of columns with at least one missing value |
 | Exact duplicates | 20% | 100 minus the percentage of rows that repeat an earlier complete row |
 | Category consistency | 15% | 100 minus the percentage of eligible normalized category groups with multiple original spellings |
 | Structural health | 20% | 100 minus the percentage of columns that are empty or constant |
@@ -21,6 +21,16 @@ score = round(sum(component_score × component_weight) / 100)
 ```
 
 Each component is limited to the 0–100 range before weighting. A dataset with no rows or no columns is marked **Not assessable** instead of receiving a misleading number.
+
+### Completeness calibration
+
+Completeness uses two equally weighted, visible measures:
+
+```text
+completeness_score = 100 - (missing_cell_percentage + affected_column_percentage) / 2
+```
+
+The missing-cell percentage captures how many values are absent overall. The affected-column percentage captures how broadly those gaps are distributed across fields. This keeps a modest overall missing rate from appearing negligible when many columns are affected. For example, 8% missing cells across 5 of 10 columns gives a completeness component of 71.0. This is a deliberate heuristic; it does not claim that all columns are equally important.
 
 ## Check details that affect scoring
 
@@ -44,4 +54,4 @@ These labels summarize the heuristic only. They do not replace domain rules, sou
 
 ## Limitations
 
-The score depends on simple, visible heuristics and can be influenced by a legitimate outlier, a valid repeated record, or a constant field that is useful for the intended analysis. Conversely, a high score does not prove that values are accurate, representative, current, or fit for a specific purpose. TALOS does not modify the uploaded DataFrame while calculating the score.
+The score depends on simple, visible heuristics and can be influenced by a legitimate outlier, a valid repeated record, or a constant field that is useful for the intended analysis. Conversely, a high score does not prove that values are accurate, representative, current, or fit for a specific purpose. TALOS does not modify the uploaded DataFrame while calculating the score. Approved Stage 9 transformations affect a separate working copy; the displayed original score continues to describe the uploaded data.
