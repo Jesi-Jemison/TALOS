@@ -4,6 +4,7 @@ import base64
 import hashlib
 import logging
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -116,6 +117,12 @@ def render_csv_download(
         mime="text/csv",
         key=f"download-evidence-{widget_key}",
     )
+
+
+def count_label(count: int, singular: str, plural: str | None = None) -> str:
+    """Format a small UI count with a readable singular or plural label."""
+    noun = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count:,} {noun}"
 
 
 def build_header_visual_html(assets_directory: Path) -> str:
@@ -343,10 +350,22 @@ def render_source_status(profile: dict[str, object], df: pd.DataFrame, demo: boo
     )
 
 
+def render_operation_status(message: str) -> None:
+    """Render session status in the TALOS palette without changing its meaning."""
+    st.markdown(
+        '<div class="talos-inspection-status" role="status" aria-live="polite">'
+        f"{escape(message)}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None:
     """Render the dataset profile and preview inside compact, optional sections."""
     with st.expander(
-        f"👁️ Dataset Overview & Structure · {profile['row_count']:,} rows · {profile['column_count']:,} columns",
+        "👁️ Dataset Overview & Structure · "
+        f"{count_label(int(profile['row_count']), 'row')} · "
+        f"{count_label(int(profile['column_count']), 'column')}",
         expanded=False,
     ):
         st.markdown('<p class="talos-section-kicker">Structural inspection</p>', unsafe_allow_html=True)
@@ -368,7 +387,11 @@ def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None
         structure = build_structure_table(profile)
         render_dataframe(structure, width="stretch", hide_index=True)
 
-    with st.expander(f"📊 Data Preview · first {min(10, len(df.index)):,} rows", expanded=False):
+    preview_count = min(10, len(df.index))
+    with st.expander(
+        f"📊 Data Preview · first {count_label(preview_count, 'row')}",
+        expanded=False,
+    ):
         st.caption("A sample of the source only. TALOS does not alter these values during inspection.")
         render_dataframe(df.head(10), width="stretch", hide_index=True)
 
@@ -378,7 +401,8 @@ def render_missing_data(
 ) -> None:
     """Render dataset-wide and column-level missing-value findings."""
     with st.expander(
-        f"🕳️ Missing Data · {analysis['affected_column_count']} affected columns · {analysis['missing_percentage']:.1f}% of cells",
+        f"🕳️ Missing Data · {count_label(int(analysis['affected_column_count']), 'affected column')} · "
+        f"{analysis['missing_percentage']:.1f}% of cells",
         expanded=False,
     ):
         st.markdown('<p class="talos-section-kicker">Completeness</p>', unsafe_allow_html=True)
@@ -414,7 +438,9 @@ def render_duplicate_checks(
 ) -> None:
     """Render exact duplicate rows and possible identifier findings."""
     with st.expander(
-        f"🪞 Duplicate Inspection · {analysis['exact_duplicate_row_count']} exact duplicate rows · {analysis['identifier_candidate_count']} identifier-name candidates",
+        f"🪞 Duplicate Inspection · "
+        f"{count_label(int(analysis['exact_duplicate_row_count']), 'exact duplicate row')} · "
+        f"{count_label(int(analysis['identifier_candidate_count']), 'identifier-name candidate')}",
         expanded=False,
     ):
         st.markdown('<p class="talos-section-kicker">Record repetition</p>', unsafe_allow_html=True)
@@ -464,7 +490,9 @@ def render_category_consistency(
 ) -> None:
     """Render case and whitespace variation in suitable text categories."""
     with st.expander(
-        f"🧬 Category Consistency · {analysis['inconsistent_group_count']} variant groups · {len(analysis['checked_columns'])} text columns checked",
+        f"🧬 Category Consistency · "
+        f"{count_label(int(analysis['inconsistent_group_count']), 'variant group')} · "
+        f"{count_label(len(analysis['checked_columns']), 'text column')} checked",
         expanded=False,
     ):
         st.markdown('<p class="talos-section-kicker">Category variation</p>', unsafe_allow_html=True)
@@ -515,7 +543,9 @@ def render_numeric_outliers(
 ) -> None:
     """Render IQR summaries and explain which numeric fields were skipped."""
     with st.expander(
-        f"📐 Numeric Outliers · {analysis['total_outlier_values']} IQR flags · {analysis['eligible_column_count']} eligible columns",
+        f"📐 Numeric Outliers · "
+        f"{count_label(int(analysis['total_outlier_values']), 'IQR flag')} · "
+        f"{count_label(int(analysis['eligible_column_count']), 'eligible column')}",
         expanded=False,
     ):
         st.markdown('<p class="talos-section-kicker">Distribution signals</p>', unsafe_allow_html=True)
@@ -584,7 +614,7 @@ def render_structural_signals(
     """Render a collapsed summary row for structural and identifier signals."""
     signal_count = len(build_structural_findings_table(analysis))
     with st.expander(
-        f"🧱 Structural & Identifier Checks · {signal_count} contextual signals",
+        f"🧱 Structural & Identifier Checks · {count_label(signal_count, 'contextual signal')}",
         expanded=False,
     ):
         render_check_context(
@@ -1500,17 +1530,23 @@ def render_forge(
         "TALOS can prepare a cleaned working copy of your dataset. "
         "No transformation is applied without your approval."
     )
-    st.info("The original dataset remains untouched. TALOS alters only the working copy.")
+    st.markdown(
+        '<p class="talos-note">The original dataset remains untouched. '
+        "TALOS alters only the working copy.</p>",
+        unsafe_allow_html=True,
+    )
 
     suggested_actions = build_suggested_transformations(working_df, working_findings)
     missing_columns = sum(int(working_df[column].isna().any()) for column in working_df.columns)
     proposal_count = len(suggested_actions) + missing_columns
     if proposal_count:
-        st.markdown(f"**TALOS has prepared {proposal_count} proposed repairs for review.**")
+        st.markdown(
+            f"**TALOS has prepared {count_label(proposal_count, 'proposed repair')} for review.**"
+        )
     else:
         st.markdown("**No repairs are proposed for the current working copy.**")
     with st.expander(
-        f"Repair Control Center · {proposal_count} proposed repairs",
+        f"Repair Control Center · {count_label(proposal_count, 'proposed repair')}",
         expanded=False,
     ):
         st.caption(
@@ -1557,7 +1593,9 @@ def render_detailed_evidence_exports(
     """Collect optional individual evidence CSVs in one predictable place."""
     working_count = len(working_tables) if ledger else 0
     with st.expander(
-        f"Detailed evidence exports · {len(original_tables)} original tables · {working_count} working-copy tables",
+        "Detailed evidence exports · "
+        f"{count_label(len(original_tables), 'original table')} · "
+        f"{count_label(working_count, 'working-copy table')}",
         expanded=False,
     ):
         st.caption(
@@ -1935,10 +1973,10 @@ def main() -> None:
 
     notice = st.session_state.get("talos_notice", "")
     if notice:
-        st.success(notice)
+        render_operation_status(notice)
         st.session_state["talos_notice"] = ""
     else:
-        st.success("Inspection complete. The guardian has recorded the findings.")
+        render_operation_status("Inspection complete. The guardian has recorded the findings.")
 
     render_source_status(profile, original_df, demo_loaded)
     render_integrity_score(original_findings["score"], source_filename)

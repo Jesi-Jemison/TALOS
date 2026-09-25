@@ -53,6 +53,7 @@ central,,11,
     assert "👁️ Guardian Summary" in {item.value for item in app.subheader}
     assert "🛡️ Dataset Integrity Score" in {item.value for item in app.subheader}
     assert any("Source received" in item.value for item in app.markdown)
+    assert any('class="talos-inspection-status"' in item.value for item in app.markdown)
     expander_labels = {item.label for item in app.get("expander")}
     assert any("Missing Data ·" in label for label in expander_labels)
     assert any("Numeric Outliers ·" in label for label in expander_labels)

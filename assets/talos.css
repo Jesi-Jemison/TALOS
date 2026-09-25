@@ -73,6 +73,7 @@ body, .stApp {
     position: relative;
     overflow: hidden;
     min-width: 0;
+    height: 15rem;
     min-height: 15rem;
     flex: 0 0 41%;
     border: 1px solid rgba(195, 154, 90, 0.72);
@@ -338,6 +339,32 @@ button:focus-visible, input:focus-visible, [role="radio"]:focus-visible,
     line-height: 1.55;
 }
 
+.talos-inspection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.78rem 0.95rem;
+    margin: 0.7rem 0;
+    border: 1px solid var(--talos-line);
+    border-left: 3px solid var(--talos-bronze-strong);
+    border-radius: 8px;
+    background: var(--talos-panel);
+    color: var(--talos-text);
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.talos-inspection-status::before {
+    width: 0.48rem;
+    height: 0.48rem;
+    flex: 0 0 auto;
+    border: 1px solid var(--talos-bronze-strong);
+    border-radius: 50%;
+    background: var(--talos-bronze);
+    box-shadow: 0 0 10px var(--talos-highlight);
+    content: "";
+}
+
 .talos-score-panel {
     display: flex;
     align-items: baseline;
@@ -431,8 +458,17 @@ button:focus-visible, input:focus-visible, [role="radio"]:focus-visible,
 @media (max-width: 760px) {
     .talos-hero-layout { align-items: stretch; flex-direction: column; }
     .talos-hero-copy { max-width: none; flex-basis: auto; }
-    .talos-sentinel-panel { min-height: 11rem; flex-basis: auto; }
-    .talos-sentinel-image { min-height: 11rem; object-position: 76% center; }
+    .talos-sentinel-panel {
+        height: auto;
+        min-height: 0;
+        flex-basis: auto;
+        aspect-ratio: 8 / 3;
+    }
+    .talos-sentinel-image {
+        height: auto;
+        min-height: 0;
+        object-position: 76% center;
+    }
 }
 
 @media (max-width: 600px) {
@@ -440,8 +476,6 @@ button:focus-visible, input:focus-visible, [role="radio"]:focus-visible,
     .talos-hero { padding: 0.9rem; }
     .talos-hero-layout { gap: 0.8rem; min-height: 0; }
     .talos-hero-copy { padding: 0.25rem; }
-    .talos-sentinel-panel { min-height: 8.5rem; }
-    .talos-sentinel-image { min-height: 8.5rem; }
     .talos-emblem-wrap { width: 4rem; }
     .talos-system-status { font-size: 0.64rem; }
     .talos-score-panel { align-items: flex-start; flex-wrap: wrap; }
