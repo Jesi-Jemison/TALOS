@@ -16,11 +16,15 @@ Screenshots use the built-in synthetic demo data.
 
 ![TALOS first-run upload screen and workflow guide](assets/screenshots/talos-landing-20260925.jpg)
 
-![TALOS dataset inspection and integrity score](assets/screenshots/talos-demo-overview-20260925.jpg)
+![TALOS synthetic dataset profile and column structure](assets/screenshots/talos-demo-overview-20260925.jpg)
 
-| The Forge | Evidence Vault |
+![TALOS Dataset Integrity Score with component weights and limitations](assets/screenshots/talos-demo-score-20260925.jpg)
+
+| The Forge | Reinspection |
 | --- | --- |
-| ![Selected repair plan and working-copy comparison](assets/screenshots/talos-demo-forge-20260925.jpg) | ![Portable inspection evidence and report exports](assets/screenshots/talos-demo-evidence-20260925.jpg) |
+| ![One category repair selected in the Repair Plan, awaiting approval](assets/screenshots/talos-demo-forge-20260925.jpg) | ![Approved repair recorded, then reinspected and compared with the original](assets/screenshots/talos-demo-reinspection-20260925.jpg) |
+
+![Evidence Vault with result-table summaries, report and ZIP exports](assets/screenshots/talos-demo-evidence-20260925.jpg)
 
 The appearance preference is session-level and leaves the inspection state intact.
 
