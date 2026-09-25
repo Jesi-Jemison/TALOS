@@ -96,12 +96,14 @@ def test_duplicate_inspection_separates_repeated_rows_from_identifier_values():
 def test_duplicate_inspection_no_duplicates_and_empty_dataframe():
     clean = inspect_duplicates(pd.DataFrame({"record_id": [1, 2, 3], "value": ["a", "b", "c"]}))
     empty = inspect_duplicates(pd.DataFrame())
+    no_columns = inspect_duplicates(pd.DataFrame(index=range(3)))
 
     assert clean["exact_duplicate_row_count"] == 0
     assert clean["exact_duplicate_percentage"] == 0.0
     assert clean["identifier_candidates"][0]["uniqueness_percentage"] == 100.0
     assert empty["exact_duplicate_row_count"] == 0
     assert empty["identifier_candidates"] == []
+    assert no_columns["exact_duplicate_row_count"] == 0
 
 
 @pytest.mark.parametrize(
