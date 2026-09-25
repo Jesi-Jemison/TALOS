@@ -76,6 +76,58 @@ def test_degraded_dataset_scores_lower_with_component_breakdown():
     assert components["Outlier signal"]["score"] < 100
 
 
+def test_completeness_accounts_for_missing_cells_and_affected_columns():
+    values = {}
+    for column_number in range(10):
+        column_values = [row_number + column_number * 100 for row_number in range(100)]
+        if column_number < 5:
+            start = column_number * 16
+            for row_number in range(start, start + 16):
+                column_values[row_number] = None
+        values[f"measure_{column_number}"] = column_values
+    spread_missingness = pd.DataFrame(values)
+
+    spread_score = build_score(spread_missingness)
+    completeness = next(
+        item for item in spread_score["components"]
+        if item["component"] == "Completeness"
+    )
+
+    assert spread_score["score"] == 91
+    assert completeness["score"] == 71.0
+    assert inspect_missing_values(spread_missingness)["missing_percentage"] == 8.0
+
+
+def test_same_missing_cell_rate_scores_lower_when_spread_across_more_columns():
+    concentrated = pd.DataFrame(
+        {
+            **{
+                f"measure_{column_number}": [
+                    None if column_number == 0 and row_number < 80 else row_number + column_number * 100
+                    for row_number in range(100)
+                ]
+                for column_number in range(10)
+            }
+        }
+    )
+    spread = pd.DataFrame(
+        {
+            f"measure_{column_number}": [
+                None if column_number < 5 and row_number < 16 else row_number + column_number * 100
+                for row_number in range(100)
+            ]
+            for column_number in range(10)
+        }
+    )
+
+    concentrated_score = build_score(concentrated)
+    spread_score = build_score(spread)
+
+    assert inspect_missing_values(concentrated)["missing_percentage"] == 8.0
+    assert inspect_missing_values(spread)["missing_percentage"] == 8.0
+    assert spread_score["score"] < concentrated_score["score"]
+
+
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
