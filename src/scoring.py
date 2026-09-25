@@ -54,6 +54,13 @@ def calculate_integrity_score(
         }
 
     column_count = len(df.columns)
+    affected_column_percentage = (
+        missing_analysis["affected_column_count"] / column_count * 100
+    )
+    completeness_score = 100 - (
+        float(missing_analysis["missing_percentage"])
+        + affected_column_percentage
+    ) / 2
     normalized_group_count = category_analysis["normalized_group_count"]
     category_score = (
         100.0
@@ -67,7 +74,7 @@ def calculate_integrity_score(
     structural_score = 100.0 * (1 - structural_issue_count / column_count)
 
     component_scores = {
-        "Completeness": 100 - float(missing_analysis["missing_percentage"]),
+        "Completeness": completeness_score,
         "Exact duplicates": 100 - float(duplicate_analysis["exact_duplicate_percentage"]),
         "Category consistency": category_score,
         "Structural health": structural_score,
