@@ -6,11 +6,23 @@ import hashlib
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app import repair_selection_key
+from app import build_guardian_summary, build_header_visual_html, inspect_dataset, repair_selection_key
 from src.transformations import build_suggested_transformations
 
 
 APP_PATH = "../app.py"
+
+
+def test_landing_keeps_the_upload_demo_path_and_guardian_identity():
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+
+    assert not app.exception
+    assert app.button(key="talos-load-demo").label == "Load TALOS demo dataset"
+    assert any(item.value == "The gate is open." for item in app.subheader)
+    assert any(
+        'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in item.value
+        for item in app.markdown
+    )
 
 
 def test_selected_repairs_require_approval_reinspect_and_reset():
@@ -35,9 +47,32 @@ central,,11,
     assert not app.exception
     assert app.session_state["talos_theme_preference"] == "Light"
     assert any(
-        'alt="TALOS bronze guardian emblem"' in element.value
+        'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in element.value
         for element in app.markdown
     )
+    assert "👁️ Guardian Summary" in {item.value for item in app.subheader}
+    assert "🛡️ Dataset Integrity Score" in {item.value for item in app.subheader}
+    assert any("Source received" in item.value for item in app.markdown)
+    expander_labels = {item.label for item in app.get("expander")}
+    assert any("Missing Data ·" in label for label in expander_labels)
+    assert any("Numeric Outliers ·" in label for label in expander_labels)
+    assert any("Repair Control Center ·" in label for label in expander_labels)
+    assert any("Detailed evidence exports ·" in label for label in expander_labels)
+    collapsed_sections = (
+        "Score components",
+        "Dataset Overview & Structure",
+        "Data Preview",
+        "Missing Data ·",
+        "Duplicate Inspection ·",
+        "Category Consistency ·",
+        "Numeric Outliers ·",
+        "Structural & Identifier Checks ·",
+        "Repair Control Center ·",
+        "Detailed evidence exports ·",
+    )
+    for section in collapsed_sections:
+        element = next(item for item in app.get("expander") if section in item.label)
+        assert element.proto.expanded is False
     original = app.session_state["talos_original_df"].copy(deep=True)
     assert original.equals(app.session_state["talos_working_df"])
     assert app.session_state["talos_transformation_ledger"] == []
@@ -45,7 +80,9 @@ central,,11,
         "Download cleaned CSV",
         "Download transformation log",
         "Download HTML report",
-        "Download CSV",
+        "missing_values.csv",
+        "structure.csv",
+        "before_after_comparison.csv",
     }
 
     missing_key = "talos_missing_strategy_" + hashlib.sha256(b"amount").hexdigest()[:16]
@@ -218,3 +255,50 @@ def test_empty_and_malformed_uploads_show_readable_feedback():
     app.run()
     assert not app.exception
     assert any("could not read" in alert.value.lower() for alert in app.error)
+
+
+def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
+    demo = pd.read_csv(Path(__file__).parent.parent / "data/sample/talos_demo.csv")
+    findings = inspect_dataset(demo)
+    summary = {item["area"]: item for item in build_guardian_summary(findings)}
+
+    assert "3 columns contain missing values" in summary["Missing values"]["message"]
+    assert "may be intentional" in summary["Duplicates & identifiers"]["message"]
+    assert "7 category variant groups" in summary["Category consistency"]["message"]
+    assert "31 values fall" in summary["Numeric distribution"]["message"]
+    assert "not automatically defects" in summary["Structure"]["message"]
+    assert summary["Missing values"]["status"] == "Significant finding"
+    assert summary["Duplicates & identifiers"]["status"] == "Review recommended"
+    assert summary["Numeric distribution"]["status"] == "Observation"
+    assert {item["status"] for item in summary.values()} >= {
+        "Observation",
+        "Review recommended",
+        "Significant finding",
+    }
+
+
+def test_guardian_summary_reports_a_clean_dataset_without_false_findings():
+    clean = pd.DataFrame(
+        {"region": ["north", "south"] * 15, "amount": list(range(1, 31))}
+    )
+    summary = build_guardian_summary(inspect_dataset(clean))
+
+    assert len(summary) == 5
+    assert all(item["status"] == "Clear" for item in summary)
+    assert all("No " in item["message"] for item in summary)
+
+
+def test_header_visual_uses_wide_art_and_falls_back_to_the_compact_emblem(tmp_path):
+    assets = Path(__file__).parent.parent / "assets"
+    visual = build_header_visual_html(assets)
+    assert 'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in visual
+    assert "data:image/webp;base64," in visual
+
+    fallback_assets = tmp_path / "assets"
+    fallback_assets.mkdir()
+    (fallback_assets / "talos-emblem.svg").write_text(
+        (assets / "talos-emblem.svg").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    fallback = build_header_visual_html(fallback_assets)
+    assert 'alt="TALOS bronze guardian emblem"' in fallback
+    assert "talos-sentinel-panel--fallback" in fallback

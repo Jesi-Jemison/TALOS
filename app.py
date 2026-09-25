@@ -102,6 +102,7 @@ def render_csv_download(
     export_type: str,
     widget_key: str,
     empty_message: str = "No applicable evidence to export.",
+    button_label: str = "Download CSV",
 ) -> None:
     """Place a small CSV download beside an applicable result table."""
     if table.empty:
@@ -109,7 +110,7 @@ def render_csv_download(
         return
     csv_bytes = table.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "Download CSV",
+        button_label,
         data=csv_bytes,
         file_name=build_export_filename(source_filename, export_type),
         mime="text/csv",
@@ -117,21 +118,42 @@ def render_csv_download(
     )
 
 
-def render_header() -> None:
-    """Show TALOS identity and system status."""
-    emblem_path = Path(__file__).parent / "assets" / "talos-emblem.svg"
+def build_header_visual_html(assets_directory: Path) -> str:
+    """Load the wide guardian art, falling back to the compact local emblem."""
+    guardian_path = assets_directory / "talos-sentinel-panel.webp"
+    emblem_path = assets_directory / "talos-emblem.svg"
     try:
-        emblem_svg = emblem_path.read_text(encoding="utf-8")
-        encoded_emblem = base64.b64encode(emblem_svg.encode("utf-8")).decode("ascii")
-        emblem_html = (
-            '<div class="talos-emblem-wrap">'
-            f'<img class="talos-emblem" src="data:image/svg+xml;base64,{encoded_emblem}" '
-            'alt="TALOS bronze guardian emblem">'
+        guardian_bytes = guardian_path.read_bytes()
+        encoded_guardian = base64.b64encode(guardian_bytes).decode("ascii")
+        return (
+            '<div class="talos-sentinel-panel">'
+            f'<img class="talos-sentinel-image" src="data:image/webp;base64,{encoded_guardian}" '
+            'alt="TALOS bronze automaton guardian with illuminated amethyst eyes">'
             "</div>"
         )
     except OSError:
-        logger.warning("TALOS emblem was not available at %s", emblem_path)
-        emblem_html = '<span role="img" aria-label="TALOS guardian emblem">◈</span>'
+        logger.warning("TALOS guardian artwork was not available at %s", guardian_path)
+        try:
+            emblem_svg = emblem_path.read_text(encoding="utf-8")
+            encoded_emblem = base64.b64encode(emblem_svg.encode("utf-8")).decode("ascii")
+            return (
+                '<div class="talos-sentinel-panel talos-sentinel-panel--fallback">'
+                '<div class="talos-emblem-wrap">'
+                f'<img class="talos-emblem" src="data:image/svg+xml;base64,{encoded_emblem}" '
+                'alt="TALOS bronze guardian emblem">'
+                "</div></div>"
+            )
+        except OSError:
+            logger.warning("TALOS emblem was not available at %s", emblem_path)
+            return (
+                '<div class="talos-sentinel-panel talos-sentinel-panel--fallback">'
+                '<span role="img" aria-label="TALOS guardian emblem">◈</span></div>'
+            )
+
+
+def render_header() -> None:
+    """Show TALOS identity and system status."""
+    visual_html = build_header_visual_html(Path(__file__).parent / "assets")
 
     st.markdown(
         f"""
@@ -148,7 +170,7 @@ def render_header() -> None:
                         Inspection system online
                     </div>
                 </div>
-                {emblem_html}
+                {visual_html}
             </div>
         </header>
         """,
@@ -166,62 +188,223 @@ def render_header() -> None:
             )
 
 
-def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None:
-    """Render file details, the dataset structure, and a small preview."""
-    st.markdown('<p class="talos-section-kicker">Structural inspection</p>', unsafe_allow_html=True)
-    st.subheader("👁️ Dataset Overview")
-    type_counts = profile["type_counts"]
-    metrics = st.columns(6)
-    metrics[0].metric("Rows", profile["row_count"])
-    metrics[1].metric("Columns", profile["column_count"])
-    metrics[2].metric("Numeric", type_counts["Numeric"])
-    metrics[3].metric("Text", type_counts["Text"])
-    metrics[4].metric("Boolean", type_counts["Boolean"])
-    metrics[5].metric("Datetime", type_counts["Datetime"])
+def build_guardian_summary(
+    findings: dict[str, dict[str, object]],
+) -> list[dict[str, str]]:
+    """Translate existing inspection results into concise, qualified status lines."""
+    missing = findings["missing"]
+    affected_columns = int(missing["affected_column_count"])
+    missing_percentage = float(missing["missing_percentage"])
+    if affected_columns:
+        missing_line = (
+            f"{affected_columns} column{'s' if affected_columns != 1 else ''} "
+            f"contain{'s' if affected_columns == 1 else ''} missing values "
+            f"({missing_percentage:.1f}% of all cells)."
+        )
+        severity_counts = missing["severity_counts"]
+        significant_columns = int(
+            severity_counts.get("Significant", 0) + severity_counts.get("Critical", 0)
+        )
+        if significant_columns:
+            missing_line += (
+                f" {significant_columns} column{'s' if significant_columns != 1 else ''} "
+                f"meet{'s' if significant_columns == 1 else ''} TALOS's significant missingness thresholds."
+            )
+            missing_status = "Significant finding"
+        else:
+            missing_status = "Review recommended"
+    else:
+        missing_line = "No missing values were detected."
+        missing_status = "Clear"
 
-    details = st.columns(2)
-    details[0].metric("Filename", profile["file_name"])
-    details[1].metric("File size", profile["file_size"])
+    duplicates = findings["duplicates"]
+    duplicate_count = int(duplicates["exact_duplicate_row_count"])
+    repeated_identifiers = int(duplicates["identifier_candidates_with_repeats"])
+    identifier_candidates = int(duplicates["identifier_candidate_count"])
+    if duplicate_count:
+        duplicate_line = (
+            f"{duplicate_count} exact duplicate row{'s' if duplicate_count != 1 else ''} "
+            f"appear{'s' if duplicate_count == 1 else ''}; this may be intentional."
+        )
+        duplicate_status = "Review recommended"
+    elif repeated_identifiers:
+        duplicate_line = (
+            f"No exact duplicate rows; {repeated_identifiers} name-based identifier "
+            "field(s) contain repeated values."
+        )
+        duplicate_status = "Observation"
+    elif identifier_candidates:
+        duplicate_line = (
+            f"No exact duplicate rows. {identifier_candidates} field name(s) suggest "
+            "possible identifiers; TALOS does not assume they must be unique."
+        )
+        duplicate_status = "Observation"
+    else:
+        duplicate_line = "No exact duplicate rows or identifier-name candidates were detected."
+        duplicate_status = "Clear"
 
-    st.subheader("Dataset Structure")
-    structure = build_structure_table(profile)
-    render_dataframe(structure, width="stretch", hide_index=True)
-    render_csv_download(
-        structure,
-        str(profile["file_name"]),
-        "structure",
-        "structure",
+    categories = findings["categories"]
+    category_groups = int(categories["inconsistent_group_count"])
+    checked_category_columns = len(categories["checked_columns"])
+    if category_groups:
+        category_line = (
+            f"{category_groups} category variant group{'s' if category_groups != 1 else ''} "
+            f"differ{'s' if category_groups == 1 else ''} only by case or spacing; "
+            "review their meaning before consolidating."
+        )
+        category_status = "Review recommended"
+    elif checked_category_columns:
+        category_line = "No case or spacing variants were detected in checked text fields."
+        category_status = "Clear"
+    else:
+        category_line = "No suitable text fields were available for category comparison."
+        category_status = "Observation"
+
+    outliers = findings["outliers"]
+    outlier_count = int(outliers["total_outlier_values"])
+    eligible_numeric_columns = int(outliers["eligible_column_count"])
+    if outlier_count:
+        outlier_line = (
+            f"{outlier_count} value{'s' if outlier_count != 1 else ''} "
+            f"fall{'s' if outlier_count == 1 else ''} outside the IQR review range; "
+            "a flag is not proof of an error."
+        )
+        outlier_status = "Observation"
+    elif eligible_numeric_columns:
+        outlier_line = "No IQR-range values were flagged in eligible numeric fields."
+        outlier_status = "Clear"
+    else:
+        outlier_line = "No numeric fields met the requirements for IQR inspection."
+        outlier_status = "Observation"
+
+    structural_count = len(build_structural_findings_table(findings["structure"]))
+    if structural_count:
+        structural_line = (
+            f"{structural_count} contextual structure signal{'s' if structural_count != 1 else ''} "
+            f"{'was' if structural_count == 1 else 'were'} recorded; "
+            "they are not automatically defects."
+        )
+        if findings["structure"]["empty_columns"] or findings["structure"]["constant_columns"]:
+            structural_status = "Review recommended"
+        else:
+            structural_status = "Observation"
+    else:
+        structural_line = (
+            "No empty, constant, high-cardinality, identifier, or numeric-pattern signals were found."
+        )
+        structural_status = "Clear"
+
+    return [
+        {"area": "Missing values", "status": missing_status, "message": missing_line},
+        {"area": "Duplicates & identifiers", "status": duplicate_status, "message": duplicate_line},
+        {"area": "Category consistency", "status": category_status, "message": category_line},
+        {"area": "Numeric distribution", "status": outlier_status, "message": outlier_line},
+        {"area": "Structure", "status": structural_status, "message": structural_line},
+    ]
+
+
+def render_guardian_summary(findings: dict[str, dict[str, object]]) -> None:
+    """Keep a readable, non-verdict summary in view above the detailed checks."""
+    st.subheader("👁️ Guardian Summary")
+    st.caption("A concise reading of TALOS signals. Context still belongs to the dataset owner.")
+    summary = build_guardian_summary(findings)
+    status_icons = {
+        "Clear": "✓",
+        "Observation": "◌",
+        "Review recommended": "⚠",
+        "Significant finding": "◆",
+    }
+    columns = st.columns(2)
+    for index, item in enumerate(summary):
+        with columns[index % len(columns)].container(border=True):
+            st.markdown(
+                f"**{status_icons[item['status']]} {item['status']} · {item['area']}**"
+            )
+            st.write(item["message"])
+
+
+def render_check_context(checked: str, why: str, limits: str) -> None:
+    """Explain a check's scope and limits in plain language."""
+    columns = st.columns(3)
+    columns[0].markdown("**What TALOS checked**")
+    columns[0].write(checked)
+    columns[1].markdown("**Why it matters**")
+    columns[1].write(why)
+    columns[2].markdown("**What TALOS cannot conclude**")
+    columns[2].write(limits)
+
+
+def render_source_status(profile: dict[str, object], df: pd.DataFrame, demo: bool) -> None:
+    """Show the active source and preservation state near the top of the inspection."""
+    label = "Synthetic demo dataset · talos_demo.csv" if demo else str(profile["file_name"])
+    st.markdown(
+        f"**Source received** · {label} · {len(df.index):,} rows × {len(df.columns):,} columns  \n"
+        "Original dataset preserved; no inspection step changes it."
     )
 
-    st.subheader("Data Preview")
-    st.caption("First 10 rows. The inspection below reports signals and leaves the data unchanged.")
-    render_dataframe(df.head(10), width="stretch", hide_index=True)
+
+def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None:
+    """Render the dataset profile and preview inside compact, optional sections."""
+    with st.expander(
+        f"👁️ Dataset Overview & Structure · {profile['row_count']:,} rows · {profile['column_count']:,} columns",
+        expanded=False,
+    ):
+        st.markdown('<p class="talos-section-kicker">Structural inspection</p>', unsafe_allow_html=True)
+        st.subheader("Dataset Overview")
+        type_counts = profile["type_counts"]
+        metrics = st.columns(6)
+        metrics[0].metric("Rows", profile["row_count"])
+        metrics[1].metric("Columns", profile["column_count"])
+        metrics[2].metric("Numeric", type_counts["Numeric"])
+        metrics[3].metric("Text", type_counts["Text"])
+        metrics[4].metric("Boolean", type_counts["Boolean"])
+        metrics[5].metric("Datetime", type_counts["Datetime"])
+
+        details = st.columns(2)
+        details[0].metric("Filename", profile["file_name"])
+        details[1].metric("File size", profile["file_size"])
+
+        st.subheader("Dataset Structure")
+        structure = build_structure_table(profile)
+        render_dataframe(structure, width="stretch", hide_index=True)
+
+    with st.expander(f"📊 Data Preview · first {min(10, len(df.index)):,} rows", expanded=False):
+        st.caption("A sample of the source only. TALOS does not alter these values during inspection.")
+        render_dataframe(df.head(10), width="stretch", hide_index=True)
 
 
 def render_missing_data(
     analysis: dict[str, object], source_filename: str = "dataset.csv"
 ) -> None:
     """Render dataset-wide and column-level missing-value findings."""
-    st.markdown('<p class="talos-section-kicker">Completeness</p>', unsafe_allow_html=True)
-    st.subheader("🕳️ Missing Data")
-    metrics = st.columns(4)
-    metrics[0].metric("Missing cells", analysis["total_missing_cells"])
-    metrics[1].metric("Dataset missing", f"{analysis['missing_percentage']:.1f}%")
-    metrics[2].metric("Affected columns", analysis["affected_column_count"])
-    metrics[3].metric("Clear columns", analysis["clear_column_count"])
-
-    if analysis["total_missing_cells"]:
-        st.warning(
-            "Some values are missing. Their effect depends on how each field is used; "
-            "TALOS does not fill or remove them."
+    with st.expander(
+        f"🕳️ Missing Data · {analysis['affected_column_count']} affected columns · {analysis['missing_percentage']:.1f}% of cells",
+        expanded=False,
+    ):
+        st.markdown('<p class="talos-section-kicker">Completeness</p>', unsafe_allow_html=True)
+        st.subheader("Missing Data")
+        render_check_context(
+            "Counts blank or null cells by column and across the dataset.",
+            "Missingness can affect totals, comparisons, joins, and the rows available to an analysis.",
+            "TALOS cannot tell whether a value is unknown, inapplicable, or intentionally blank.",
         )
-    else:
-        st.success("No missing cells found in this dataset.")
+        metrics = st.columns(4)
+        metrics[0].metric("Missing cells", analysis["total_missing_cells"])
+        metrics[1].metric("Dataset missing", f"{analysis['missing_percentage']:.1f}%")
+        metrics[2].metric("Affected columns", analysis["affected_column_count"])
+        metrics[3].metric("Clear columns", analysis["clear_column_count"])
 
-    rows = build_missing_values_table(analysis)
-    if not rows.empty:
-        render_dataframe(rows, width="stretch", hide_index=True)
-        render_csv_download(rows, source_filename, "missing", "missing")
+        if analysis["total_missing_cells"]:
+            st.warning(
+                "Some values are missing. Their effect depends on how each field is used; "
+                "TALOS does not fill or remove them."
+            )
+        else:
+            st.success("No missing cells found in this dataset.")
+
+        rows = build_missing_values_table(analysis)
+        if not rows.empty:
+            render_dataframe(rows, width="stretch", hide_index=True)
 
 
 def render_duplicate_checks(
@@ -230,85 +413,99 @@ def render_duplicate_checks(
     source_filename: str = "dataset.csv",
 ) -> None:
     """Render exact duplicate rows and possible identifier findings."""
-    st.markdown('<p class="talos-section-kicker">Record repetition</p>', unsafe_allow_html=True)
-    st.subheader("🪞 Duplicate Inspection")
-    metrics = st.columns(3)
-    metrics[0].metric("Exact duplicate rows", analysis["exact_duplicate_row_count"])
-    metrics[1].metric("Rows duplicated", f"{analysis['exact_duplicate_percentage']:.1f}%")
-    metrics[2].metric("Possible identifier fields", analysis["identifier_candidate_count"])
-
-    if analysis["exact_duplicate_row_count"]:
-        st.warning(
-            "Some rows exactly match an earlier row. This may be intentional; "
-            "TALOS does not remove duplicates."
+    with st.expander(
+        f"🪞 Duplicate Inspection · {analysis['exact_duplicate_row_count']} exact duplicate rows · {analysis['identifier_candidate_count']} identifier-name candidates",
+        expanded=False,
+    ):
+        st.markdown('<p class="talos-section-kicker">Record repetition</p>', unsafe_allow_html=True)
+        st.subheader("Duplicate Inspection")
+        render_check_context(
+            "Finds rows that match earlier rows and fields whose names suggest identifiers.",
+            "Repeated records or identifier values can affect counts, record matching, and joins.",
+            "TALOS cannot decide whether repeated records or identifier values are valid in context.",
         )
-        duplicate_rows = build_duplicate_rows_table(df if df is not None else pd.DataFrame(), analysis)
-        st.caption("Rows involved in exact matches. Source row numbers refer to CSV data rows.")
-        render_dataframe(duplicate_rows.head(20), width="stretch", hide_index=True)
-        if len(duplicate_rows.index) > 20:
-            st.caption(f"Showing 20 of {len(duplicate_rows.index):,} duplicate-group rows.")
-        render_csv_download(duplicate_rows, source_filename, "duplicates", "duplicate-rows")
-    else:
-        st.success("No exact duplicate rows found.")
-        st.caption("No duplicate-row evidence to export.")
+        metrics = st.columns(3)
+        metrics[0].metric("Exact duplicate rows", analysis["exact_duplicate_row_count"])
+        metrics[1].metric("Rows duplicated", f"{analysis['exact_duplicate_percentage']:.1f}%")
+        metrics[2].metric("Possible identifier fields", analysis["identifier_candidate_count"])
 
-    rows = build_identifier_findings_table(analysis)
-
-    if not rows.empty:
-        st.caption(
-            "Candidate fields are selected from their names only. Repeats are a review signal; "
-            "not every candidate must be unique."
-        )
-        render_dataframe(rows, width="stretch", hide_index=True)
-        render_csv_download(rows, source_filename, "identifiers", "identifiers")
-        if analysis["identifier_candidates_with_repeats"]:
-            st.info(
-                "Repeated values appear in a possible identifier field. "
-                "Confirm whether uniqueness is required."
+        if analysis["exact_duplicate_row_count"]:
+            st.warning(
+                "Some rows exactly match an earlier row. This may be intentional; "
+                "TALOS does not remove duplicates."
             )
-    else:
-        st.caption("No column names clearly suggest a possible identifier field.")
+            duplicate_rows = build_duplicate_rows_table(df if df is not None else pd.DataFrame(), analysis)
+            st.caption("Rows involved in exact matches. Source row numbers refer to CSV data rows.")
+            render_dataframe(duplicate_rows.head(20), width="stretch", hide_index=True)
+            if len(duplicate_rows.index) > 20:
+                st.caption(f"Showing 20 of {len(duplicate_rows.index):,} duplicate-group rows.")
+        else:
+            st.success("No exact duplicate rows found.")
+            st.caption("No duplicate-row evidence to export.")
+
+        rows = build_identifier_findings_table(analysis)
+        if not rows.empty:
+            st.caption(
+                "Candidate fields are selected from their names only. Repeats are a review signal; "
+                "not every candidate must be unique."
+            )
+            render_dataframe(rows, width="stretch", hide_index=True)
+            if analysis["identifier_candidates_with_repeats"]:
+                st.info(
+                    "Repeated values appear in a possible identifier field. "
+                    "Confirm whether uniqueness is required."
+                )
+        else:
+            st.caption("No column names clearly suggest a possible identifier field.")
 
 
 def render_category_consistency(
     analysis: dict[str, object], source_filename: str = "dataset.csv"
 ) -> None:
     """Render case and whitespace variation in suitable text categories."""
-    st.markdown('<p class="talos-section-kicker">Category variation</p>', unsafe_allow_html=True)
-    st.subheader("🧬 Category Consistency")
-    metrics = st.columns(3)
-    metrics[0].metric("Text columns checked", len(analysis["checked_columns"]))
-    metrics[1].metric("Variant groups", analysis["inconsistent_group_count"])
-    metrics[2].metric("Columns with variants", analysis["column_count_with_variants"])
-    st.markdown(
-        """
-        <p class="talos-note">
-            TALOS compares text after trimming outer whitespace, collapsing repeated spaces,
-            and ignoring letter case. It does not merge or change values.
-        </p>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if analysis["variant_groups"]:
-        st.warning(
-            "Some category values look equivalent after simple text normalisation. "
-            "Review them in context."
+    with st.expander(
+        f"🧬 Category Consistency · {analysis['inconsistent_group_count']} variant groups · {len(analysis['checked_columns'])} text columns checked",
+        expanded=False,
+    ):
+        st.markdown('<p class="talos-section-kicker">Category variation</p>', unsafe_allow_html=True)
+        st.subheader("Category Consistency")
+        render_check_context(
+            "Compares suitable text categories after trimming and collapsing spaces and ignoring case.",
+            "Equivalent labels can split counts or create duplicate category values in summaries.",
+            "TALOS cannot determine whether similar labels mean the same thing in the source context.",
         )
-        rows = build_category_variants_table(analysis)
-        render_dataframe(rows, width="stretch", hide_index=True)
-        render_csv_download(rows, source_filename, "categories", "category-variants")
-    elif analysis["checked_columns"]:
-        st.success("No case or whitespace variants found in the text columns TALOS checked.")
-    else:
-        st.info("No suitable text category columns were available for this check.")
+        metrics = st.columns(3)
+        metrics[0].metric("Text columns checked", len(analysis["checked_columns"]))
+        metrics[1].metric("Variant groups", analysis["inconsistent_group_count"])
+        metrics[2].metric("Columns with variants", analysis["column_count_with_variants"])
+        st.markdown(
+            """
+            <p class="talos-note">
+                TALOS compares text after trimming outer whitespace, collapsing repeated spaces,
+                and ignoring letter case. It does not merge or change values.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    if analysis["skipped_columns"]:
-        with st.expander("Columns not checked"):
-            skipped = pd.DataFrame(analysis["skipped_columns"]).rename(
-                columns={"column": "Column", "reason": "Reason"}
+        if analysis["variant_groups"]:
+            st.warning(
+                "Some category values look equivalent after simple text normalisation. "
+                "Review them in context."
             )
-            render_dataframe(skipped, width="stretch", hide_index=True)
+            rows = build_category_variants_table(analysis)
+            render_dataframe(rows, width="stretch", hide_index=True)
+        elif analysis["checked_columns"]:
+            st.success("No case or whitespace variants found in the text columns TALOS checked.")
+        else:
+            st.info("No suitable text category columns were available for this check.")
+
+        if analysis["skipped_columns"]:
+            with st.expander(f"Columns not checked · {len(analysis['skipped_columns'])}"):
+                skipped = pd.DataFrame(analysis["skipped_columns"]).rename(
+                    columns={"column": "Column", "reason": "Reason"}
+                )
+                render_dataframe(skipped, width="stretch", hide_index=True)
 
 
 def render_numeric_outliers(
@@ -317,66 +514,91 @@ def render_numeric_outliers(
     source_filename: str = "dataset.csv",
 ) -> None:
     """Render IQR summaries and explain which numeric fields were skipped."""
-    st.markdown('<p class="talos-section-kicker">Distribution signals</p>', unsafe_allow_html=True)
-    st.subheader("📐 Numeric Outliers")
-    metrics = st.columns(3)
-    metrics[0].metric("Potential outlier values", analysis["total_outlier_values"])
-    metrics[1].metric("Numeric columns checked", analysis["eligible_column_count"])
-    metrics[2].metric("Outlier values", f"{analysis['outlier_percentage']:.1f}%")
-    st.markdown(
-        """
-        <p class="talos-note">
-            TALOS uses the IQR rule: values below Q1 − 1.5 × IQR or above Q3 + 1.5 × IQR
-            are flagged. An outlier is not automatically an error.
-        </p>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if analysis["total_outlier_values"]:
-        st.warning("Some numeric values are outside the IQR range and may deserve review.")
-        rows = [
-            {
-                "Column": item["column"],
-                "Q1": item["q1"],
-                "Median": item["median"],
-                "Q3": item["q3"],
-                "Lower bound": item["lower_bound"],
-                "Upper bound": item["upper_bound"],
-                "Outliers": item["outlier_count"],
-                "Outlier %": f"{item['outlier_percentage']:.1f}%",
-                "Sample values": ", ".join(map(str, item["sample_values"])) or "None",
-            }
-            for item in analysis["columns"]
-        ]
-        render_dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-        outlier_rows = build_outlier_rows_table(
-            df if df is not None else pd.DataFrame(), analysis
+    with st.expander(
+        f"📐 Numeric Outliers · {analysis['total_outlier_values']} IQR flags · {analysis['eligible_column_count']} eligible columns",
+        expanded=False,
+    ):
+        st.markdown('<p class="talos-section-kicker">Distribution signals</p>', unsafe_allow_html=True)
+        st.subheader("Numeric Outliers")
+        render_check_context(
+            "Flags values beyond Q1 − 1.5 × IQR or Q3 + 1.5 × IQR in eligible numeric fields.",
+            "Unusual values can influence averages, ranges, and model inputs.",
+            "An IQR flag does not establish that a value is incorrect or should be removed.",
         )
-        st.caption(
-            f"Flagged source values. Showing up to 20 of {len(outlier_rows):,}; "
-            "the CSV contains every flagged value."
+        metrics = st.columns(3)
+        metrics[0].metric("Potential outlier values", analysis["total_outlier_values"])
+        metrics[1].metric("Numeric columns checked", analysis["eligible_column_count"])
+        metrics[2].metric("Outlier values", f"{analysis['outlier_percentage']:.1f}%")
+        st.markdown(
+            """
+            <p class="talos-note">
+                TALOS uses the IQR rule: values below Q1 − 1.5 × IQR or above Q3 + 1.5 × IQR
+                are flagged. An outlier is not automatically an error.
+            </p>
+            """,
+            unsafe_allow_html=True,
         )
-        render_dataframe(outlier_rows.head(20), width="stretch", hide_index=True)
-        render_csv_download(outlier_rows, source_filename, "outliers", "outliers")
-    elif analysis["eligible_column_count"]:
-        st.success("No IQR outliers found in the numeric columns TALOS checked.")
-        st.caption("No flagged-value evidence to export.")
-    else:
-        st.info("No numeric columns met the minimum requirements for IQR inspection.")
 
-    if analysis["skipped_columns"]:
-        with st.expander("Numeric fields not checked"):
-            skipped = pd.DataFrame(analysis["skipped_columns"]).rename(
-                columns={"column": "Column", "reason": "Reason"}
+        if analysis["total_outlier_values"]:
+            st.warning("Some numeric values are outside the IQR range and may deserve review.")
+            rows = [
+                {
+                    "Column": item["column"],
+                    "Q1": item["q1"],
+                    "Median": item["median"],
+                    "Q3": item["q3"],
+                    "Lower bound": item["lower_bound"],
+                    "Upper bound": item["upper_bound"],
+                    "Outliers": item["outlier_count"],
+                    "Outlier %": f"{item['outlier_percentage']:.1f}%",
+                    "Sample values": ", ".join(map(str, item["sample_values"])) or "None",
+                }
+                for item in analysis["columns"]
+            ]
+            render_dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            outlier_rows = build_outlier_rows_table(
+                df if df is not None else pd.DataFrame(), analysis
             )
-            render_dataframe(skipped, width="stretch", hide_index=True)
+            st.caption(
+                f"Flagged source values. Showing up to 20 of {len(outlier_rows):,}; "
+                "the CSV contains every flagged value."
+            )
+            render_dataframe(outlier_rows.head(20), width="stretch", hide_index=True)
+        elif analysis["eligible_column_count"]:
+            st.success("No IQR outliers found in the numeric columns TALOS checked.")
+            st.caption("No flagged-value evidence to export.")
+        else:
+            st.info("No numeric columns met the minimum requirements for IQR inspection.")
+
+        if analysis["skipped_columns"]:
+            with st.expander(f"Numeric fields not checked · {len(analysis['skipped_columns'])}"):
+                skipped = pd.DataFrame(analysis["skipped_columns"]).rename(
+                    columns={"column": "Column", "reason": "Reason"}
+                )
+                render_dataframe(skipped, width="stretch", hide_index=True)
 
 
 def render_structural_signals(
     analysis: dict[str, object], source_filename: str = "dataset.csv"
 ) -> None:
-    """Render empty, constant, high-cardinality, identifier, and numeric signals."""
+    """Render a collapsed summary row for structural and identifier signals."""
+    signal_count = len(build_structural_findings_table(analysis))
+    with st.expander(
+        f"🧱 Structural & Identifier Checks · {signal_count} contextual signals",
+        expanded=False,
+    ):
+        render_check_context(
+            "Looks for empty or constant fields, high-cardinality text, identifier-name hints, and numeric patterns.",
+            "These patterns can affect grouping, joins, interpretation, or later analysis choices.",
+            "TALOS cannot infer whether a field or value is appropriate without its intended use.",
+        )
+        _render_structural_signal_details(analysis, source_filename)
+
+
+def _render_structural_signal_details(
+    analysis: dict[str, object], source_filename: str
+) -> None:
+    """Render the detailed structural and identifier findings."""
     st.markdown('<p class="talos-section-kicker">Dataset shape signals</p>', unsafe_allow_html=True)
     st.subheader("🧱 Structural & Identifier Checks")
     metrics = st.columns(4)
@@ -465,22 +687,12 @@ def render_structural_signals(
         )
         render_dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
-    structural_table = build_structural_findings_table(analysis)
-    render_csv_download(
-        structural_table,
-        source_filename,
-        "structural",
-        "structural-findings",
-        "No structural findings to export.",
-    )
-
-
 def render_integrity_score(
     analysis: dict[str, object], source_filename: str = "dataset.csv"
 ) -> None:
     """Render the weighted score and the contribution of each component."""
     st.markdown('<p class="talos-section-kicker">Combined inspection</p>', unsafe_allow_html=True)
-    st.subheader("🛡️ Dataset Integrity")
+    st.subheader("🛡️ Dataset Integrity Score")
     if analysis["score"] is None:
         st.info(analysis["explanation"])
         return
@@ -499,22 +711,25 @@ def render_integrity_score(
         "An illustrative TALOS heuristic, not an industry-standard data-quality measure. "
         "It summarises the findings above; it is not a verdict that data is correct or incorrect."
     )
-    rows = build_integrity_score_table(analysis)
-    rows["Weight"] = rows["Weight"].map(lambda value: f"{value}%")
-    rows["Component score"] = rows["Component score"].map(lambda value: f"{value:.1f}")
-    rows["Weighted points"] = rows["Weighted points"].map(lambda value: f"{value:.1f}")
-    render_dataframe(rows, width="stretch", hide_index=True)
-    render_csv_download(rows, source_filename, "score", "integrity-score")
-    st.markdown(
-        """
-        <p class="talos-note">
-            Potential identifier repeats, high-cardinality text, negative values, and
-            zero-heavy fields remain visible as contextual signals. They do not lower the
-            score because their meaning depends on the dataset.
-        </p>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.expander(
+        f"Score components · {analysis['score']} / 100 · {analysis['band']}",
+        expanded=False,
+    ):
+        rows = build_integrity_score_table(analysis)
+        rows["Weight"] = rows["Weight"].map(lambda value: f"{value}%")
+        rows["Component score"] = rows["Component score"].map(lambda value: f"{value:.1f}")
+        rows["Weighted points"] = rows["Weighted points"].map(lambda value: f"{value:.1f}")
+        render_dataframe(rows, width="stretch", hide_index=True)
+        st.markdown(
+            """
+            <p class="talos-note">
+                Potential identifier repeats, high-cardinality text, negative values, and
+                zero-heavy fields remain visible as contextual signals. They do not lower the
+                score because their meaning depends on the dataset.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def inspect_dataset(df: pd.DataFrame) -> dict[str, dict[str, object]]:
@@ -833,7 +1048,7 @@ def render_repair_control_center(
     )
 
     selected_actions: list[dict[str, object]] = []
-    with st.expander(f"Text & whitespace · {len(whitespace)} proposed", expanded=bool(whitespace)):
+    with st.expander(f"Text & whitespace · {len(whitespace)} proposed", expanded=False):
         if not whitespace:
             st.caption("No safe whitespace normalisations are currently suggested.")
         elif len(whitespace) > 1:
@@ -861,7 +1076,7 @@ def render_repair_control_center(
                 action["label"] = f"Normalize whitespace · {column}"
                 selected_actions.append(action)
 
-    with st.expander(f"Category normalisation · {len(categories)} proposed", expanded=bool(categories)):
+    with st.expander(f"Category normalisation · {len(categories)} proposed", expanded=False):
         if not categories:
             st.caption("No category-variant groups are currently suggested.")
         elif len(categories) > 1:
@@ -1045,7 +1260,7 @@ def render_transformation_ledger(
     ledger: list[dict[str, object]], source_filename: str = "dataset.csv"
 ) -> None:
     """Show the session-only record of approved working-copy changes."""
-    st.subheader("📜 Transformation Ledger")
+    st.subheader(f"📜 Transformation Ledger · {len(ledger)} approved")
     if not ledger:
         st.caption("No transformations have been approved in this session.")
         return
@@ -1066,12 +1281,6 @@ def render_transformation_ledger(
         for item in ledger
     ]
     render_dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-    render_csv_download(
-        build_transformation_log(ledger),
-        source_filename,
-        "transformations",
-        "transformation-ledger",
-    )
     for index, item in enumerate(ledger, start=1):
         label = f"Entry {index} · {item['transformation_type']}"
         with st.expander(label):
@@ -1161,20 +1370,13 @@ def render_dataset_comparison(
     comparison = build_comparison_table(
         original_df, working_df, original_findings, working_findings
     )
-    render_dataframe(comparison, width="stretch", hide_index=True)
-    render_csv_download(comparison, source_filename, "comparison", "comparison")
-
     score_comparison = build_score_comparison_table(
         original_findings["score"], working_findings["score"]
     )
-    if not score_comparison.empty:
-        render_dataframe(score_comparison, width="stretch", hide_index=True)
-        render_csv_download(
-            score_comparison,
-            source_filename,
-            "score_comparison",
-            "score-comparison",
-        )
+    with st.expander("Detailed original / working copy comparison", expanded=False):
+        render_dataframe(comparison, width="stretch", hide_index=True)
+        if not score_comparison.empty:
+            render_dataframe(score_comparison, width="stretch", hide_index=True)
 
     unresolved = {
         "Missing values": working_findings["missing"]["total_missing_cells"] > 0,
@@ -1245,7 +1447,7 @@ def render_dataset_comparison(
                     ),
                 }
             )
-        with st.expander("What remains in the working copy", expanded=True):
+        with st.expander("What remains in the working copy", expanded=False):
             render_dataframe(pd.DataFrame(remaining_details), width="stretch", hide_index=True)
             st.caption(
                 "These are the results of reinspection. Some signals are contextual and may be intentionally left unchanged."
@@ -1300,9 +1502,22 @@ def render_forge(
     )
     st.info("The original dataset remains untouched. TALOS alters only the working copy.")
 
-    st.subheader("Repair Control Center")
-    st.caption("Choose by category, column, or category group. TALOS applies nothing until you approve a complete Repair Plan.")
-    render_repair_control_center(working_df, working_findings)
+    suggested_actions = build_suggested_transformations(working_df, working_findings)
+    missing_columns = sum(int(working_df[column].isna().any()) for column in working_df.columns)
+    proposal_count = len(suggested_actions) + missing_columns
+    if proposal_count:
+        st.markdown(f"**TALOS has prepared {proposal_count} proposed repairs for review.**")
+    else:
+        st.markdown("**No repairs are proposed for the current working copy.**")
+    with st.expander(
+        f"Repair Control Center · {proposal_count} proposed repairs",
+        expanded=False,
+    ):
+        st.caption(
+            "Choose by category, column, or category group. TALOS applies nothing until "
+            "you approve a complete Repair Plan."
+        )
+        render_repair_control_center(working_df, working_findings)
 
     ledger = st.session_state["talos_transformation_ledger"]
     render_transformation_ledger(ledger, source_filename)
@@ -1329,6 +1544,105 @@ def load_emblem_svg() -> str:
     except OSError:
         logger.warning("TALOS emblem was not available for the report at %s", emblem_path)
         return ""
+
+
+def render_detailed_evidence_exports(
+    source_filename: str,
+    original_tables: dict[str, pd.DataFrame],
+    working_tables: dict[str, pd.DataFrame],
+    original_findings: dict[str, dict[str, object]],
+    working_findings: dict[str, dict[str, object]],
+    ledger: list[dict[str, object]],
+) -> None:
+    """Collect optional individual evidence CSVs in one predictable place."""
+    working_count = len(working_tables) if ledger else 0
+    with st.expander(
+        f"Detailed evidence exports · {len(original_tables)} original tables · {working_count} working-copy tables",
+        expanded=False,
+    ):
+        st.caption(
+            "Individual CSVs for the findings above. These files document signals; they do not change either dataset."
+        )
+        export_types = {
+            "structure": "structure",
+            "missing_values": "missing",
+            "duplicate_rows": "duplicates",
+            "identifier_findings": "identifiers",
+            "category_variants": "categories",
+            "outliers": "outliers",
+            "structural_findings": "structural",
+            "integrity_score": "score",
+        }
+
+        def render_group(
+            tables: dict[str, pd.DataFrame],
+            label: str,
+            export_prefix: str,
+            widget_prefix: str,
+        ) -> None:
+            if not tables:
+                return
+            st.markdown(f"**{label}**")
+            columns = st.columns(2)
+            for index, (filename, table) in enumerate(tables.items()):
+                stem = Path(filename).stem
+                export_type = export_types.get(stem, stem)
+                if export_prefix:
+                    export_type = f"{export_prefix}-{export_type}"
+                with columns[index % len(columns)]:
+                    render_csv_download(
+                        table,
+                        source_filename,
+                        export_type,
+                        f"{widget_prefix}-{stem}",
+                        button_label=f"{filename}",
+                    )
+
+        render_group(original_tables, "Original inspection evidence", "", "original")
+        if ledger:
+            render_group(
+                working_tables,
+                "Current working-copy evidence",
+                "working",
+                "working",
+            )
+
+        comparison = build_comparison_table(
+            st.session_state["talos_original_df"],
+            st.session_state["talos_working_df"],
+            original_findings,
+            working_findings,
+        )
+        score_comparison = build_score_comparison_table(
+            original_findings["score"], working_findings["score"]
+        )
+        st.markdown("**Comparison and ledger evidence**")
+        columns = st.columns(2)
+        with columns[0]:
+            render_csv_download(
+                comparison,
+                source_filename,
+                "comparison",
+                "comparison",
+                button_label="before_after_comparison.csv",
+            )
+        with columns[1]:
+            if not score_comparison.empty:
+                render_csv_download(
+                    score_comparison,
+                    source_filename,
+                    "score_comparison",
+                    "score-comparison",
+                    button_label="score_comparison.csv",
+                )
+        if ledger:
+            render_csv_download(
+                build_transformation_log(ledger),
+                source_filename,
+                "transformations",
+                "transformation-ledger",
+                button_label="transformation_ledger.csv",
+            )
 
 
 def render_exports_and_report(
@@ -1465,6 +1779,15 @@ def render_exports_and_report(
             mime="application/zip",
             key="download-evidence-pack",
         )
+
+    render_detailed_evidence_exports(
+        str(original_profile["file_name"]),
+        original_tables,
+        working_tables,
+        original_findings,
+        working_findings,
+        ledger,
+    )
 
 
 def render_first_time_experience() -> None:
@@ -1606,10 +1929,6 @@ def main() -> None:
     working_df = st.session_state["talos_working_df"]
     original_findings = st.session_state["talos_original_findings"]
     working_findings = st.session_state["talos_working_findings"]
-    if uploaded_file is None and demo_loaded:
-        st.caption(
-            f"Synthetic showcase dataset · {len(original_df):,} records · no personal data."
-        )
     if st.session_state.get("talos_evidence_revision") != st.session_state.get("talos_data_revision"):
         with st.spinner(f"Preparing portable evidence for {len(working_df):,} working-copy records."):
             prepare_evidence_tables(profile)
@@ -1621,6 +1940,9 @@ def main() -> None:
     else:
         st.success("Inspection complete. The guardian has recorded the findings.")
 
+    render_source_status(profile, original_df, demo_loaded)
+    render_integrity_score(original_findings["score"], source_filename)
+    render_guardian_summary(original_findings)
     render_dataset_profile(profile, original_df)
     st.markdown('<p class="talos-section-kicker">Original dataset inspection</p>', unsafe_allow_html=True)
     render_missing_data(original_findings["missing"], source_filename)
@@ -1628,7 +1950,6 @@ def main() -> None:
     render_category_consistency(original_findings["categories"], source_filename)
     render_numeric_outliers(original_findings["outliers"], original_df, source_filename)
     render_structural_signals(original_findings["structure"], source_filename)
-    render_integrity_score(original_findings["score"], source_filename)
     render_forge(original_df, working_df, original_findings, working_findings, source_filename)
     render_exports_and_report(profile, original_findings, working_findings)
     st.markdown(

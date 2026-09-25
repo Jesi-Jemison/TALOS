@@ -71,6 +71,7 @@ def test_export_filenames_are_predictable_and_strip_path_components():
     assert build_export_filename("/private/folder/orders.csv", "cleaned") == "orders_talos_cleaned.csv"
     assert build_export_filename("C:\\upload\\orders.csv", "transformations") == "orders_talos_transformations.csv"
     assert build_export_filename(".csv", "report") == "dataset_talos_report.html"
+    assert build_export_filename("orders.csv", "working-missing") == "orders_talos_working_missing_values.csv"
 
 
 def test_cleaned_csv_contains_dataframe_without_index_and_is_utf8():
