@@ -215,6 +215,7 @@ The structure will grow gradually as functionality is added.
 The app accepts CSV files, reports their basic structure and previews the first ten rows. Empty, malformed, or unreadable files receive a clear message instead of a traceback. The test suite covers the loader, column classification, profile output, and file-size formatting.
 
 Data-quality checks have not been implemented and will be added in a later stage.
+
 ---
 
 ## 🔮 Future Improvements
