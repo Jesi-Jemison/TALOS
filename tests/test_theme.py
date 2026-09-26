@@ -60,6 +60,8 @@ def test_alert_surfaces_keep_readable_text_and_component_overrides():
     assert "[data-testid=\"stWidgetLabel\"] p" in stylesheet
     assert "background-color: var(--talos-input) !important" in stylesheet
     assert "background-color: var(--talos-panel) !important" in stylesheet
+    assert '[data-testid="stSelectbox"] [role="group"]' in stylesheet
+    assert '[data-testid="stSelectbox"] input[role="combobox"]' in stylesheet
     assert ".talos-section-divider::after" in stylesheet
 
 

@@ -381,6 +381,27 @@ body, .stApp {
     opacity: 1 !important;
 }
 
+/* Streamlit's current selectbox uses React Aria rather than BaseWeb. */
+[data-testid="stSelectbox"] [role="group"] {
+    border: 1px solid var(--talos-line) !important;
+    background-color: var(--talos-input) !important;
+    color: var(--talos-text) !important;
+}
+
+[data-testid="stSelectbox"] input[role="combobox"] {
+    border-color: transparent !important;
+    background-color: transparent !important;
+    color: var(--talos-text) !important;
+    opacity: 1 !important;
+}
+
+[data-testid="stSelectbox"] [role="group"] button,
+[data-testid="stSelectbox"] [role="group"] svg {
+    background-color: transparent !important;
+    color: var(--talos-text) !important;
+    fill: var(--talos-text) !important;
+}
+
 [data-baseweb="popover"],
 [data-baseweb="menu"],
 [role="listbox"] {
