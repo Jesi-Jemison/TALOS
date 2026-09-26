@@ -1,4 +1,4 @@
-"""TALOS v1.1.1 release metadata consistency checks."""
+"""TALOS v1.1.2 release metadata consistency checks."""
 
 from pathlib import Path
 
@@ -15,7 +15,7 @@ def test_source_version_readme_changelog_and_ui_footer_are_in_sync():
     runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     test_requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
 
-    assert __version__ == "1.1.1"
+    assert __version__ == "1.1.2"
     assert f"Current release: v{__version__}" in readme
     assert f"## v{__version__}" in changelog
     assert f"TALOS v{__version__}" in app

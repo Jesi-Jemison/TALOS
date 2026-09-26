@@ -1,4 +1,4 @@
-"""TALOS v1.1.1 copy-returning repairs and approved transformation records."""
+"""TALOS v1.1.2 copy-returning repairs and approved transformation records."""
 
 from __future__ import annotations
 
@@ -32,6 +32,40 @@ TEXT_NORMALISATION_RULES = (
 
 OUTLIER_REMEDIATION_STRATEGIES = {
     "blank", "mean", "median", "custom", "remove_rows", "cap",
+    "remove_negative_integers", "remove_negative_integer_outliers",
+}
+
+_ADDRESS_SUFFIXES = {
+    "rd": "Road",
+    "road": "Road",
+    "st": "Street",
+    "street": "Street",
+    "ave": "Avenue",
+    "av": "Avenue",
+    "avenue": "Avenue",
+    "blvd": "Boulevard",
+    "boulevard": "Boulevard",
+    "dr": "Drive",
+    "drive": "Drive",
+    "ln": "Lane",
+    "lane": "Lane",
+    "ct": "Court",
+    "court": "Court",
+    "pl": "Place",
+    "place": "Place",
+    "hwy": "Highway",
+    "highway": "Highway",
+    "pkwy": "Parkway",
+    "parkway": "Parkway",
+    "cir": "Circle",
+    "circle": "Circle",
+    "ter": "Terrace",
+    "terrace": "Terrace",
+    "trl": "Trail",
+    "trail": "Trail",
+    "sq": "Square",
+    "square": "Square",
+    "way": "Way",
 }
 
 _RISKY_TEXT_COLUMN = re.compile(
@@ -49,6 +83,7 @@ def normalize_text_value(
     trim_leading: bool = False,
     trim_trailing: bool = False,
     collapse_internal_spaces: bool = False,
+    standardize_address_suffixes: bool = False,
 ) -> object:
     """Apply one deterministic text style and only the selected whitespace rules."""
     if not isinstance(value, str):
@@ -63,6 +98,18 @@ def normalize_text_value(
         text = text.rstrip()
     if collapse_internal_spaces:
         text = re.sub(r"(?<=\S)[ \t\r\n\f\v]+(?=\S)", " ", text)
+    if standardize_address_suffixes:
+        suffix_match = re.search(
+            r"(?i)(?<!\w)([a-z]+)\.?([ \t\r\n\f\v]*)$", text
+        )
+        if suffix_match:
+            canonical_suffix = _ADDRESS_SUFFIXES.get(suffix_match.group(1).casefold())
+            if canonical_suffix:
+                text = (
+                    text[: suffix_match.start(1)]
+                    + canonical_suffix
+                    + suffix_match.group(2)
+                )
 
     if rule == "Leave unchanged":
         return text
@@ -71,7 +118,12 @@ def normalize_text_value(
     if rule == "UPPERCASE":
         return text.upper()
     if rule == "Proper Case":
-        return text.title()
+        proper = text.title()
+        return re.sub(
+            r"(?<=\w)(['’])S\b",
+            lambda match: match.group(1) + "s",
+            proper,
+        )
     if rule == "Sentence case":
         lowered = text.lower()
         for index, character in enumerate(lowered):
@@ -88,7 +140,9 @@ def normalize_text_value(
     if rule == "camelCase":
         if not words:
             return ""
-        return words[0].lower() + "".join(word[:1].upper() + word[1:].lower() for word in words[1:])
+        return words[0].lower() + "".join(
+            word[:1].upper() + word[1:].lower() for word in words[1:]
+        )
     raise ValueError(f"Unsupported text normalisation rule: {rule!r}.")
 
 
@@ -132,6 +186,7 @@ def build_text_normalisation_plan(
     trim_leading: bool = False,
     trim_trailing: bool = False,
     collapse_internal_spaces: bool = False,
+    standardize_address_suffixes: bool = False,
     preview_limit: int = 100,
 ) -> dict[str, Any]:
     """Preview text mappings without mutating ``df`` or expanding row controls."""
@@ -188,12 +243,22 @@ def build_text_normalisation_plan(
                 if value_rule not in TEXT_NORMALISATION_RULES:
                     raise ValueError(f"Unsupported value-level text rule: {value_rule!r}.")
                 target = str(
-                    normalize_text_value(value, value_rule, **whitespace_options)
+                    normalize_text_value(
+                        value,
+                        value_rule,
+                        **whitespace_options,
+                        standardize_address_suffixes=standardize_address_suffixes,
+                    )
                 )
                 manual_override_count += 1
             elif mode == "default":
                 target = str(
-                    normalize_text_value(value, column_rule, **whitespace_options)
+                    normalize_text_value(
+                        value,
+                        column_rule,
+                        **whitespace_options,
+                        standardize_address_suffixes=standardize_address_suffixes,
+                    )
                 )
             else:
                 raise ValueError(f"Unsupported override mode: {mode!r}.")
@@ -207,7 +272,12 @@ def build_text_normalisation_plan(
                             "Column": column,
                             "Original": value,
                             "Default output": str(
-                                normalize_text_value(value, column_rule, **whitespace_options)
+                                normalize_text_value(
+                                    value,
+                                    column_rule,
+                                    **whitespace_options,
+                                    standardize_address_suffixes=standardize_address_suffixes,
+                                )
                             ),
                             "Final output": target,
                             "Rows": counts[value],
@@ -227,6 +297,7 @@ def build_text_normalisation_plan(
         "column_rules": {column: (column_rules or {}).get(column, global_rule) for column in columns},
         "value_overrides": overrides,
         "whitespace": whitespace_options,
+        "standardize_address_suffixes": bool(standardize_address_suffixes),
         "canonical_values": mapping,
         "preview": pd.DataFrame(
             preview_rows,
@@ -491,20 +562,38 @@ def build_outlier_remediation_plan(
         strategy = str(choice.get("strategy", "leave"))
         if strategy == "leave":
             continue
-        if column not in eligible or column not in df.columns:
+        negative_strategy = strategy in {
+            "remove_negative_integers",
+            "remove_negative_integer_outliers",
+        }
+        if column not in df.columns:
             raise ValueError(f"{column!r} is not an eligible IQR outlier column.")
         if strategy not in OUTLIER_REMEDIATION_STRATEGIES:
             raise ValueError(f"Unsupported outlier strategy: {strategy!r}.")
 
-        finding = eligible[column]
         series = df[column]
+        finding = eligible.get(column)
+        if negative_strategy:
+            if is_bool_dtype(series.dtype) or not is_numeric_dtype(series.dtype):
+                raise ValueError(f"{column!r} is not a numeric field.")
+        elif finding is None:
+            raise ValueError(f"{column!r} is not an eligible IQR outlier column.")
         values = pd.to_numeric(series, errors="coerce").to_numpy(
             dtype="float64", na_value=np.nan
         )
         finite = np.isfinite(values)
-        lower = float(finding["lower_bound"])
-        upper = float(finding["upper_bound"])
-        mask = finite & ((values < lower) | (values > upper))
+        lower = float(finding["lower_bound"]) if finding is not None else None
+        upper = float(finding["upper_bound"]) if finding is not None else None
+        if negative_strategy:
+            negative_integers = finite & (values < 0) & (values == np.trunc(values))
+            if strategy == "remove_negative_integers":
+                mask = negative_integers
+            elif finding is not None:
+                mask = negative_integers & ((values < lower) | (values > upper))
+            else:
+                mask = np.zeros(len(values), dtype=bool)
+        else:
+            mask = finite & ((values < lower) | (values > upper))
         positions = np.flatnonzero(mask)
         if not len(positions):
             continue
@@ -537,7 +626,12 @@ def build_outlier_remediation_plan(
 
         selected_positions = {int(position) for position in positions}
         affected_positions.update(selected_positions)
-        if strategy == "remove_rows":
+        removes_rows = strategy in {
+            "remove_rows",
+            "remove_negative_integers",
+            "remove_negative_integer_outliers",
+        }
+        if removes_rows:
             removal_positions.update(selected_positions)
         affected_values += len(positions)
 
@@ -566,13 +660,24 @@ def build_outlier_remediation_plan(
                 "column": str(column),
                 "strategy": strategy,
                 "outlier_count": int(len(positions)),
-                "outlier_percentage": float(finding["outlier_percentage"]),
+                "outlier_percentage": (
+                    float(finding["outlier_percentage"])
+                    if finding is not None and not negative_strategy
+                    else float(len(positions) / int(finite.sum()) * 100)
+                ),
                 "lower_bound": lower,
                 "upper_bound": upper,
                 "replacement_method": replacement_method,
                 "replacement_value": replacement,
                 "rows_affected": int(len(positions)),
-                "rows_removed": int(len(positions)) if strategy == "remove_rows" else 0,
+                "rows_removed": int(len(positions)) if removes_rows else 0,
+                "criteria": (
+                    "negative_integer_values"
+                    if strategy == "remove_negative_integers"
+                    else "negative_integer_iqr_outliers"
+                    if strategy == "remove_negative_integer_outliers"
+                    else "iqr_outliers"
+                ),
                 "examples": examples,
             }
         )
@@ -614,19 +719,40 @@ def apply_outlier_remediation_plan(
         values = pd.to_numeric(series, errors="coerce").to_numpy(
             dtype="float64", na_value=np.nan
         )
-        lower = float(item["lower_bound"])
-        upper = float(item["upper_bound"])
-        mask = np.isfinite(values) & ((values < lower) | (values > upper))
+        strategy = item["strategy"]
+        finite = np.isfinite(values)
+        if strategy in {
+            "remove_negative_integers",
+            "remove_negative_integer_outliers",
+        }:
+            negative_integers = finite & (values < 0) & (values == np.trunc(values))
+            if strategy == "remove_negative_integers":
+                mask = negative_integers
+            else:
+                lower = item.get("lower_bound")
+                upper = item.get("upper_bound")
+                if lower is None or upper is None:
+                    raise ValueError("Negative integer outlier bounds are missing from the approved plan.")
+                lower = float(lower)
+                upper = float(upper)
+                mask = negative_integers & ((values < lower) | (values > upper))
+        else:
+            lower = float(item["lower_bound"])
+            upper = float(item["upper_bound"])
+            mask = finite & ((values < lower) | (values > upper))
         positions = np.flatnonzero(mask)
         if len(positions) != int(item["outlier_count"]):
             raise ValueError(
-                f"The IQR findings for {column!r} changed after the plan was prepared. Review the plan again."
+                f"The numeric findings for {column!r} changed after the plan was prepared. Review the plan again."
             )
         touched_positions.update(int(position) for position in positions)
-        strategy = item["strategy"]
         total_values += len(positions)
 
-        if strategy == "remove_rows":
+        if strategy in {
+            "remove_rows",
+            "remove_negative_integers",
+            "remove_negative_integer_outliers",
+        }:
             removal_mask[positions] = True
         elif strategy == "blank":
             if is_extension_array_dtype(series.dtype):
@@ -660,7 +786,7 @@ def apply_outlier_remediation_plan(
                 for key in (
                     "column", "strategy", "outlier_count", "outlier_percentage",
                     "lower_bound", "upper_bound", "replacement_method", "replacement_value",
-                    "rows_affected", "rows_removed",
+                    "rows_affected", "rows_removed", "criteria",
                 )
             }
         )
@@ -668,7 +794,7 @@ def apply_outlier_remediation_plan(
     unique_rows_removed = int(removal_mask.sum())
     for example in aggregate_examples:
         if removal_mask[int(example["row_position"]) - 1]:
-            example["after"] = "(row removed by selected IQR action)"
+            example["after"] = "(row removed by selected numeric action)"
     if unique_rows_removed:
         result = result.iloc[np.flatnonzero(~removal_mask)].copy(deep=True)
 
@@ -680,7 +806,7 @@ def apply_outlier_remediation_plan(
         df,
         result,
         len(touched_positions),
-        "Applied the approved per-column IQR actions to the working copy.",
+        "Applied the approved per-column numeric remediation to the working copy.",
         aggregate_examples,
         {
             "columns": ledger_columns,
@@ -738,6 +864,9 @@ def apply_text_normalisation_plan(
         "selected_columns": selected_columns,
         "column_rules": plan.get("column_rules", {}),
         "whitespace": plan.get("whitespace", {}),
+        "standardize_address_suffixes": bool(
+            plan.get("standardize_address_suffixes", False)
+        ),
         "manual_override_count": int(plan.get("manual_override_count", 0)),
         "value_overrides": plan.get("value_overrides", {}),
         "affected_values": int(plan.get("values_affected", 0)),

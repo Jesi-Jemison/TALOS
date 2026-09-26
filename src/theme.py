@@ -1,4 +1,4 @@
-"""TALOS v1.1.1 session colour tokens for the Streamlit interface."""
+"""TALOS v1.1.2 session colour tokens for the Streamlit interface."""
 
 from __future__ import annotations
 

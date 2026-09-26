@@ -57,6 +57,10 @@ def test_alert_surfaces_keep_readable_text_and_component_overrides():
     assert '[data-testid="stExpander"] details > summary:focus-visible' in stylesheet
     assert '[data-testid="stDataFrame"] [data-testid="stToolbar"]' in stylesheet
     assert "color: var(--talos-alert-text) !important" in stylesheet
+    assert "[data-testid=\"stWidgetLabel\"] p" in stylesheet
+    assert "background-color: var(--talos-input) !important" in stylesheet
+    assert "background-color: var(--talos-panel) !important" in stylesheet
+    assert ".talos-section-divider::after" in stylesheet
 
 
 def test_theme_tokens_are_copied_and_invalid_names_are_rejected():

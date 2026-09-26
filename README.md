@@ -2,11 +2,9 @@
 
 **Raw data enters. Nothing passes unchecked.**
 
-**Current release: v1.1.1 — Streamlit Forge controls, report polish, and product voice refinement.**
+**Current release: v1.1.2 — Streamlit readability, Forge controls, and text normalisation.**
 
-This patch follows the repository's existing v1.1.0 release. The supplied
-brief labels this work v1.0.3; the version stays monotonic with the code
-already on `main`.
+This patch follows v1.1.1 and continues the published version sequence.
 
 [Open the live Streamlit app](https://talos-app.streamlit.app/) · [View the source](https://github.com/Jesi-Jemison/TALOS)
 
@@ -46,7 +44,8 @@ The appearance preference is session-level and leaves the inspection state intac
 - Inspects missingness, exact duplicate rows, category variation, IQR outliers, possible identifiers, empty and constant columns, high-cardinality text, and numeric patterns.
 - Calculates an explainable, custom **Dataset Integrity Score** with visible components and weights.
 - Offers granular, user-selected repairs in **The Forge**. Each selection becomes a previewable Repair Plan before anything is applied.
-- Lets users remove selected fields and choose an IQR response per numeric column: leave unchanged, blank, non-outlier mean or median, custom value, remove affected rows, or cap to the nearest IQR boundary.
+- Lets users remove selected fields and choose an IQR response per numeric column: leave unchanged, blank, non-outlier mean or median, custom value, remove affected rows, or cap to the nearest IQR boundary. Numeric remediation can also target all negative whole-number values or only negative whole-number IQR outliers.
+- Applies a global text style with per-column overrides, including Proper Case, Sentence case, camelCase, upper/lowercase, and optional address-suffix standardisation such as Road/Rd and Street/St.
 - Reinspects the working copy after approval, compares it with the source, and records each operation in a transformation ledger.
 - Keeps the PDF concise and aggregate-focused; detailed row evidence remains available in the HTML report, CSV exports, and ZIP Evidence Pack.
 - Provides session-level dark and light themes with readable alerts, tables, captions, and expandable sections.
@@ -114,25 +113,53 @@ Core modules do not depend on Streamlit or session state.
 
 ## Run locally
 
-Use Python 3.10 or newer. These steps start the Streamlit product from a fresh
-clone.
+Use Python 3.10 or newer. Clone the repository, create an isolated environment,
+install the Streamlit requirements, and launch the app from the repository
+root:
 
 ```bash
 git clone https://github.com/Jesi-Jemison/TALOS.git
 cd TALOS
 python -m venv .venv
+```
+
+Activate the environment in your terminal:
+
+```bash
+# macOS or Linux
 source .venv/bin/activate
+```
+
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+```bat
+:: Windows Command Prompt
+.venv\Scripts\activate.bat
+```
+
+Then install dependencies and launch TALOS:
+
+```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`. From
-Command Prompt, use `.venv\Scripts\activate.bat`. Once Streamlit starts, open
-the local URL it prints, usually `http://localhost:8501`. Choose **Load TALOS
-demo dataset** to try an inspection and approved repair, or upload a UTF-8 CSV.
-Stop the server with **Ctrl+C** in its terminal. To use another port, run
-`streamlit run app.py --server.port 8502`.
+If the `streamlit` command is not on PATH after activation, use
+`python -m streamlit run app.py`. Open the local URL printed in the terminal,
+usually `http://localhost:8501`. Choose **Load TALOS demo dataset** to explore
+the inspection and Forge, or upload a UTF-8 CSV. Uploaded files remain in the
+active app session; TALOS does not write the original CSV back to disk. Stop
+the server with **Ctrl+C** in its terminal. To use another port, run
+`python -m streamlit run app.py --server.port 8502`.
+
+To restart later, open a terminal in the repository, activate `.venv` using
+the command for your operating system above, and run the Streamlit command
+again. If installation fails, confirm the environment is active with
+`python --version` and `python -m pip --version` before reinstalling.
 
 To run the complete tests, install the test-only PDF reader and run pytest:
 
@@ -196,8 +223,8 @@ TALOS reads CSV files only. Its rules do not infer business context, enforce a s
 ## Project status
 
 The Streamlit product and the separately released Python/CLI interfaces are
-implemented. This v1.1.1 update adds per-column outlier remediation, manual
-column removal, clearer light-mode surfaces, a concise PDF report, and
-consistent product copy across the app and reports. TALOS remains a
-review-first workflow and does not infer business meaning or certify that a
+implemented. This v1.1.2 update strengthens light-mode control contrast and
+section flow, adds negative-integer remediation choices, and makes global,
+per-column, and address-suffix text normalisation easier to use. TALOS remains
+a review-first workflow and does not infer business meaning or certify that a
 dataset is ready for analysis.

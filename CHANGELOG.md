@@ -4,6 +4,24 @@ Release numbers are kept in sequence with the code already published on
 `main`. `src.__version__` is the canonical machine-readable version; the README
 and this log state the current product release.
 
+## v1.1.2 — Streamlit readability, numeric remediation, and text normalisation
+
+This patch follows v1.1.1 and keeps the work within the existing Streamlit
+product.
+
+- Strengthened light-mode labels, select controls, menus, and expander headers
+  so text keeps clear contrast against its surface. Added visible separators
+  between inspection findings, Forge, reinspection history, and the Evidence
+  Vault.
+- Added user-approved removal of all negative integer values or only negative
+  integer IQR outliers. Fractional negatives and positive IQR outliers remain
+  untouched by these targeted choices.
+- Made the global text style and per-column inheritance/override sequence more
+  visible. Added opt-in standardisation for common address suffix pairs such
+  as Road/Rd, Street/St, and Avenue/Ave.
+- Expanded Streamlit local-run instructions and aligned release comments and
+  portfolio notes with v1.1.2.
+
 ## v1.1.1 — Streamlit Forge controls and report polish
 
 This is the patch release after v1.1.0. The supplied work brief used v1.0.3,

@@ -1,4 +1,4 @@
-# TALOS v1.1.1 Streamlit runtime compatibility range.
+# TALOS v1.1.2 Streamlit runtime compatibility range.
 streamlit>=1.40,<2
 pandas>=2.2,<3
 numpy>=1.26,<3

@@ -61,6 +61,37 @@ def test_text_normalisation_whitespace_options_are_independent_and_nontext_is_pr
     assert normalize_text_value(123, "UPPERCASE", trim_leading=True) == 123
 
 
+def test_text_normalisation_can_standardise_common_address_suffix_variants():
+    values = ["10 main rd", "10 Main Road", "8 Oak st.", "8 Oak Street", "St. John's"]
+    original = pd.DataFrame({"address": values})
+
+    plan = build_text_normalisation_plan(
+        original,
+        "Proper Case",
+        ["address"],
+        standardize_address_suffixes=True,
+    )
+
+    assert plan["canonical_values"]["address"] == {
+        "10 main rd": "10 Main Road",
+        "10 Main Road": "10 Main Road",
+        "8 Oak st.": "8 Oak Street",
+        "8 Oak Street": "8 Oak Street",
+        "St. John's": "St. John's",
+    }
+    assert plan["standardize_address_suffixes"] is True
+    assert plan["values_affected"] == 2
+
+    working, record = apply_transformation(
+        original, {"type": "normalize_text", "plan": plan}
+    )
+    assert working["address"].iloc[:4].tolist() == [
+        "10 Main Road", "10 Main Road", "8 Oak Street", "8 Oak Street"
+    ]
+    assert record["parameters"]["standardize_address_suffixes"] is True
+    pd.testing.assert_series_equal(original["address"], pd.Series(values, name="address"))
+
+
 def test_text_plan_precedence_preview_counts_and_approved_copy_preserve_source():
     original = pd.DataFrame(
         {"status": ["  blue  sky  ", "BLUE", "Blue", "other", None]}
@@ -478,6 +509,56 @@ def test_outlier_leave_unchanged_is_the_default_and_creates_no_action():
     plan = build_outlier_remediation_plan(original, {"amount": {"strategy": "leave"}})
     assert plan["column_actions"] == []
     assert plan["affected_values"] == 0
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_negative_integer_removal_targets_whole_negative_values_and_preserves_source():
+    original = pd.DataFrame(
+        {"amount": [7, 4, -3, -2, -1.5], "record": list("abcde")}
+    )
+    source_copy = original.copy(deep=True)
+
+    plan = build_outlier_remediation_plan(
+        original, {"amount": {"strategy": "remove_negative_integers"}}
+    )
+    assert plan["affected_values"] == 2
+    assert plan["unique_rows_removed"] == 2
+    action = plan["column_actions"][0]
+    assert action["lower_bound"] is None
+    assert action["criteria"] == "negative_integer_values"
+
+    working, record = apply_transformation(
+        original, {"type": "remediate_outliers", "plan": plan}
+    )
+    assert working["amount"].tolist()[-1] == -1.5
+    assert not working["amount"].isin([-3, -2]).any()
+    assert record["parameters"]["unique_rows_removed"] == 2
+    assert record["parameters"]["columns"][0]["criteria"] == "negative_integer_values"
+    pd.testing.assert_frame_equal(original, source_copy)
+
+
+def test_negative_integer_outlier_removal_keeps_positive_and_fractional_outliers():
+    original = pd.DataFrame(
+        {
+            "amount": [*range(1, 11), -100, -200, 100, 200, -100.5],
+            "record": list("abcdefghijklmno"),
+        }
+    )
+    source_copy = original.copy(deep=True)
+
+    plan = build_outlier_remediation_plan(
+        original, {"amount": {"strategy": "remove_negative_integer_outliers"}}
+    )
+    assert plan["affected_values"] == 2
+    assert plan["unique_rows_removed"] == 2
+    assert all(item["before"] in {-100, -200} for item in plan["column_actions"][0]["examples"])
+
+    working, record = apply_transformation(
+        original, {"type": "remediate_outliers", "plan": plan}
+    )
+    assert {-100, -200}.isdisjoint(set(working["amount"]))
+    assert {100, 200, -100.5}.issubset(set(working["amount"]))
+    assert record["parameters"]["columns"][0]["criteria"] == "negative_integer_iqr_outliers"
     pd.testing.assert_frame_equal(original, source_copy)
 
 

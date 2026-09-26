@@ -1,8 +1,9 @@
-"""TALOS v1.1.1 Streamlit interface for intake, inspection, and review-first repair."""
+"""TALOS v1.1.2 Streamlit interface for inspection and review-first repair."""
 
 import base64
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -903,9 +904,31 @@ def text_widget_key(kind: str, column: str, value: str = "") -> str:
 def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | None:
     """Render a preview-first lexical plan and return its approved action proposal."""
     with st.expander("Text Normalisation", expanded=False):
-        st.markdown("Set the house style, then make exceptions where the data demands them.")
-        st.caption("Set the rule. Mark the exceptions. Nothing reaches the working copy until the plan is approved.")
+        st.markdown("Set one default style, then override individual columns where needed.")
+        st.caption("TALOS previews every mapping. Nothing reaches the working copy until you approve the Repair Plan.")
 
+        st.markdown("**1 · Global text style**")
+        global_rule = st.selectbox(
+            "Default text style",
+            TEXT_NORMALISATION_RULES,
+            key="talos_text_global_rule",
+            help="This style applies to every selected column that inherits the default.",
+        )
+        whitespace_cols = st.columns(3)
+        trim_leading = whitespace_cols[0].checkbox("Trim leading whitespace", key="talos_text_trim_leading")
+        trim_trailing = whitespace_cols[1].checkbox("Trim trailing whitespace", key="talos_text_trim_trailing")
+        collapse_spaces = whitespace_cols[2].checkbox(
+            "Collapse repeated spaces", key="talos_text_collapse_spaces"
+        )
+        standardize_address_suffixes = st.checkbox(
+            "Standardise common address suffixes",
+            key="talos_text_address_suffixes",
+            help="On selected columns, map suffix pairs such as Road/Rd, Street/St, Avenue/Ave, and Drive/Dr to their full form before applying the text style.",
+        )
+        if standardize_address_suffixes:
+            st.caption("Suffix matching is case-insensitive and only applies at the end of each selected value. Review the preview for fields that are not addresses.")
+
+        st.markdown("**2 · Choose text columns**")
         all_text_columns = [
             str(column)
             for column, series in working_df.items()
@@ -913,6 +936,15 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
             and series.dropna().map(lambda value: isinstance(value, str)).all()
         ]
         recommended = recommend_text_normalisation_columns(working_df)
+        address_columns = [
+            column
+            for column in all_text_columns
+            if re.search(
+                r"(?:^|[^a-z0-9])(address|addresses|street|road)(?:$|[^a-z0-9])",
+                column,
+                flags=re.IGNORECASE,
+            )
+        ]
         advanced = st.checkbox(
             "Show all text columns, including names, free text, identifiers, and high-cardinality fields",
             key="talos_text_advanced_columns",
@@ -923,8 +955,15 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
             if any(column not in recommended for column in all_text_columns):
                 st.warning("These fields may contain names, codes, URLs, or free text. Review the preview carefully.")
         else:
-            options = recommended
-            st.caption("TALOS favours controlled categories here. Names, identifiers, URLs, and free text stay outside the Forge unless you explicitly bring them in.")
+            options = list(
+                dict.fromkeys(
+                    [*recommended, *(address_columns if standardize_address_suffixes else [])]
+                )
+            )
+            if standardize_address_suffixes and address_columns:
+                st.caption("Address-named fields are available for suffix normalisation. Select the fields you want TALOS to review.")
+            else:
+                st.caption("TALOS favours controlled categories here. Names, identifiers, URLs, and free text stay outside the Forge unless you explicitly bring them in.")
 
         selection_key = "talos_text_selected_columns"
         if selection_key not in st.session_state:
@@ -947,20 +986,12 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
                 "High-cardinality columns require the advanced opt-in. TALOS limits the preview and pages value exceptions."
             )
 
-        global_rule = st.selectbox(
-            "Default text style",
-            TEXT_NORMALISATION_RULES,
-            key="talos_text_global_rule",
-        )
-        whitespace_cols = st.columns(3)
-        trim_leading = whitespace_cols[0].checkbox("Trim leading whitespace", key="talos_text_trim_leading")
-        trim_trailing = whitespace_cols[1].checkbox("Trim trailing whitespace", key="talos_text_trim_trailing")
-        collapse_spaces = whitespace_cols[2].checkbox(
-            "Collapse repeated spaces", key="talos_text_collapse_spaces"
-        )
-
+        st.markdown("**3 · Adjust columns individually (optional)**")
         column_rules: dict[str, str] = {}
-        with st.expander("Column-level rules", expanded=False):
+        with st.expander(
+            "Override the global style by column",
+            expanded=bool(selected_columns) and len(selected_columns) <= 8,
+        ):
             if not selected_columns:
                 st.caption("Select one or more columns to set column-level rules.")
             for column in selected_columns:
@@ -969,6 +1000,7 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
                     f"Rule for {column}",
                     ["Use global default", *TEXT_NORMALISATION_RULES],
                     key=key,
+                    help="Use global default to inherit the main style, or choose a different style for this column.",
                 )
                 if selection != "Use global default":
                     column_rules[column] = selection
@@ -1086,6 +1118,7 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
                 trim_leading=trim_leading,
                 trim_trailing=trim_trailing,
                 collapse_internal_spaces=collapse_spaces,
+                standardize_address_suffixes=standardize_address_suffixes,
                 preview_limit=100,
             )
         except (TypeError, ValueError) as error:
@@ -1112,6 +1145,10 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
             if enabled
         ]
         st.markdown("**Whitespace:** " + (", ".join(active_whitespace) if active_whitespace else "unchanged"))
+        st.markdown(
+            "**Address suffixes:** "
+            + ("standardise common abbreviations" if standardize_address_suffixes else "unchanged")
+        )
         if not plan["preview"].empty:
             preview_limit = 25 if any(working_df[column].nunique(dropna=True) > 1000 for column in selected_columns) else 100
             render_dataframe(plan["preview"].head(preview_limit), width="stretch", hide_index=True)
@@ -1212,23 +1249,82 @@ def outlier_widget_key(column: str, kind: str = "strategy") -> str:
     return f"talos_outlier_{kind}_{digest}"
 
 
+def _has_negative_integer_values(df: pd.DataFrame) -> bool:
+    """Return whether any numeric field contains a finite negative integer."""
+    for _, series in df.items():
+        if is_bool_dtype(series.dtype) or not is_numeric_dtype(series.dtype):
+            continue
+        values = pd.to_numeric(series, errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        )
+        negative_integers = (
+            np.isfinite(values) & (values < 0) & (values == np.trunc(values))
+        )
+        if negative_integers.any():
+            return True
+    return False
+
+
 def render_outlier_remediation(
     working_df: pd.DataFrame, findings: dict[str, dict[str, object]]
 ) -> dict[str, object] | None:
-    """Collect explicit per-column IQR choices and show their calculated preview."""
-    eligible_columns = [
-        item for item in findings["outliers"]["columns"] if int(item["outlier_count"])
-    ]
+    """Collect explicit per-column IQR and negative-integer repair choices."""
+    iqr_findings = {
+        str(item["column"]): item for item in findings["outliers"]["columns"]
+    }
+    eligible_columns: list[dict[str, object]] = []
+    negative_integer_total = 0
+    for raw_column in working_df.columns:
+        column = str(raw_column)
+        series = working_df[raw_column]
+        if is_bool_dtype(series.dtype) or not is_numeric_dtype(series.dtype):
+            continue
+        numeric_values = pd.to_numeric(series, errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        )
+        finite = np.isfinite(numeric_values)
+        negative_integers = finite & (numeric_values < 0) & (numeric_values == np.trunc(numeric_values))
+        negative_count = int(negative_integers.sum())
+        finding = iqr_findings.get(column)
+        lower = float(finding["lower_bound"]) if finding is not None else None
+        upper = float(finding["upper_bound"]) if finding is not None else None
+        negative_outlier_count = (
+            int((negative_integers & ((numeric_values < lower) | (numeric_values > upper))).sum())
+            if lower is not None and upper is not None
+            else 0
+        )
+        iqr_count = int(finding["outlier_count"]) if finding is not None else 0
+        negative_integer_total += negative_count
+        if iqr_count or negative_count:
+            item = dict(finding or {})
+            item.update(
+                {
+                    "column": column,
+                    "outlier_count": iqr_count,
+                    "outlier_percentage": (
+                        float(finding["outlier_percentage"]) if finding is not None else 0.0
+                    ),
+                    "lower_bound": lower,
+                    "upper_bound": upper,
+                    "negative_integer_count": negative_count,
+                    "negative_integer_outlier_count": negative_outlier_count,
+                }
+            )
+            eligible_columns.append(item)
+
+    total_iqr_outliers = int(findings["outliers"]["total_outlier_values"])
     with st.expander(
-        f"Outlier remediation · {count_label(int(findings['outliers']['total_outlier_values']), 'flagged value')}",
+        "Numeric remediation · "
+        f"{count_label(total_iqr_outliers, 'IQR-flagged value')} · "
+        f"{count_label(negative_integer_total, 'negative integer value')}",
         expanded=False,
     ):
         st.caption(
-            "An outlier is not automatically an error. Leave unchanged is the default; "
-            "nothing reaches the working copy before you approve the Repair Plan."
+            "IQR choices act on statistical outliers. Negative-integer choices target exact whole-number values below zero, either across the column or only where they also cross the IQR bounds. "
+            "An unusual value is not automatically an error. Nothing reaches the working copy before you approve the Repair Plan."
         )
         if not eligible_columns:
-            st.info("No IQR outliers are present in the current working copy.")
+            st.info("No IQR outliers or negative integer values are present in numeric fields.")
             return None
 
         labels_to_strategy = {
@@ -1239,23 +1335,41 @@ def render_outlier_remediation(
             "Replace with custom value": "custom",
             "Remove affected rows": "remove_rows",
             "Cap to nearest IQR boundary": "cap",
+            "Remove rows with negative integer values": "remove_negative_integers",
+            "Remove rows with negative integer outliers only": "remove_negative_integer_outliers",
         }
-        strategy_options = list(labels_to_strategy)
         choices: dict[str, dict[str, object]] = {}
         for item in eligible_columns:
             column = str(item["column"])
-            st.markdown(
-                f"**{column}** · {int(item['outlier_count']):,} values · "
-                f"{float(item['outlier_percentage']):.1f}% of usable values"
-            )
-            st.caption(
-                f"IQR review bounds: {float(item['lower_bound']):,.6g} to "
-                f"{float(item['upper_bound']):,.6g}. These bounds flag values for review; "
-                "they are not business-valid limits."
-            )
+            iqr_count = int(item["outlier_count"])
+            negative_count = int(item["negative_integer_count"])
+            negative_outlier_count = int(item["negative_integer_outlier_count"])
+            detail = [
+                f"{count_label(iqr_count, 'IQR outlier')}",
+                f"{count_label(negative_count, 'negative integer')}",
+            ]
+            st.markdown(f"**{column}** · " + " · ".join(detail))
+            if iqr_count and item.get("lower_bound") is not None:
+                st.caption(
+                    f"IQR review bounds: {float(item['lower_bound']):,.6g} to "
+                    f"{float(item['upper_bound']):,.6g}. These bounds flag values for review; "
+                    "they are not business-valid limits."
+                )
+
+            available_labels = ["Leave unchanged"]
+            if iqr_count:
+                available_labels.extend(
+                    label
+                    for label, strategy in labels_to_strategy.items()
+                    if strategy in {"blank", "mean", "median", "custom", "remove_rows", "cap"}
+                )
+            if negative_count:
+                available_labels.append("Remove rows with negative integer values")
+            if negative_outlier_count:
+                available_labels.append("Remove rows with negative integer outliers only")
             selected = st.selectbox(
                 f"Action for {column}",
-                strategy_options,
+                available_labels,
                 key=outlier_widget_key(column),
             )
             strategy = labels_to_strategy[selected]
@@ -1278,7 +1392,7 @@ def render_outlier_remediation(
             return None
         st.markdown("**Outlier preview**")
         st.write(
-            f"{plan['affected_values']:,} flagged values affected · "
+            f"{plan['affected_values']:,} matched values affected · "
             f"{plan['unique_rows_removed']:,} unique rows to remove"
             + (
                 f" · {plan['overlap_rows_removed']:,} overlapping row flags counted once"
@@ -1288,7 +1402,15 @@ def render_outlier_remediation(
         )
         for item in plan["column_actions"]:
             strategy = str(item["strategy"])
-            if strategy in {"mean", "median", "custom"}:
+            if strategy == "remove_negative_integers":
+                st.markdown(
+                    f"**{item['column']}** · remove {item['rows_removed']:,} rows with negative integer values"
+                )
+            elif strategy == "remove_negative_integer_outliers":
+                st.markdown(
+                    f"**{item['column']}** · remove {item['rows_removed']:,} rows with negative integer outliers"
+                )
+            elif strategy in {"mean", "median", "custom"}:
                 st.markdown(
                     f"**{item['column']}** · {strategy.title()} replacement: "
                     f"{float(item['replacement_value']):,.6g}"
@@ -1297,7 +1419,7 @@ def render_outlier_remediation(
                 st.markdown(f"**{item['column']}** · cap to the nearest IQR boundary")
             elif strategy == "blank":
                 st.markdown(f"**{item['column']}** · replace flagged values with missing values")
-            else:
+            elif strategy == "remove_rows":
                 st.markdown(
                     f"**{item['column']}** · remove {item['rows_removed']:,} rows "
                     "(overlaps with other selected columns are counted once)"
@@ -1439,9 +1561,10 @@ def render_repair_control_center(
     categories = [item for item in suggestions if item["action"]["type"] == "consolidate_category"]
     duplicates = [item for item in suggestions if item["action"]["type"] == "remove_exact_duplicates"]
     empty_columns = [item for item in suggestions if item["action"]["type"] == "remove_empty_column"]
-    has_outlier_options = any(
+    has_iqr_outliers = any(
         int(item["outlier_count"]) > 0 for item in findings["outliers"]["columns"]
     )
+    has_outlier_options = has_iqr_outliers or _has_negative_integer_values(working_df)
     missing_columns = [
         str(column)
         for column in working_df.columns
@@ -1784,11 +1907,18 @@ def render_repair_control_center(
                 for column_action in outlier_plan["column_actions"]:
                     strategy = str(column_action["strategy"])
                     detail = (
-                        f"**{column_action['column']}** · {column_action['outlier_count']:,} values "
-                        f"({column_action['outlier_percentage']:.1f}%) · "
-                        f"bounds {column_action['lower_bound']:,.6g} to {column_action['upper_bound']:,.6g} · "
+                        f"**{column_action['column']}** · "
+                        f"{column_action['outlier_count']:,} matched values · "
                         f"{strategy.replace('_', ' ')}"
                     )
+                    if (
+                        column_action.get("lower_bound") is not None
+                        and column_action.get("upper_bound") is not None
+                    ):
+                        detail += (
+                            f" · IQR bounds {column_action['lower_bound']:,.6g} to "
+                            f"{column_action['upper_bound']:,.6g}"
+                        )
                     if column_action.get("replacement_value") is not None:
                         detail += f" · replacement {column_action['replacement_value']:,.6g}"
                     if strategy == "remove_rows":
@@ -2081,7 +2211,7 @@ def render_forge(
     source_filename: str,
 ) -> None:
     """Render suggestions, approvals, the ledger, comparison, and reset controls."""
-    st.markdown('<p class="talos-section-kicker">The Forge</p>', unsafe_allow_html=True)
+    st.markdown('<p class="talos-section-divider">02 · The Forge</p>', unsafe_allow_html=True)
     st.header("The Forge")
     st.markdown("Findings become proposed repairs here. You decide what changes.")
     st.markdown(
@@ -2108,6 +2238,10 @@ def render_forge(
         )
         render_repair_control_center(working_df, working_findings)
 
+    st.markdown(
+        '<p class="talos-section-divider">03 · Reinspection and change history</p>',
+        unsafe_allow_html=True,
+    )
     ledger = st.session_state["talos_transformation_ledger"]
     render_transformation_ledger(ledger, source_filename)
     original_summary = summarize_dataset(original_df, original_findings)
@@ -2586,16 +2720,23 @@ def main() -> None:
     render_integrity_score(original_findings["score"], source_filename)
     render_guardian_summary(original_findings)
     render_dataset_profile(profile, original_df)
-    st.markdown('<p class="talos-section-kicker">Source Inspection</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="talos-section-divider">01 · Inspection findings</p>',
+        unsafe_allow_html=True,
+    )
     render_missing_data(original_findings["missing"], source_filename)
     render_duplicate_checks(original_findings["duplicates"], original_df, source_filename)
     render_category_consistency(original_findings["categories"], source_filename)
     render_numeric_outliers(original_findings["outliers"], original_df, source_filename)
     render_structural_signals(original_findings["structure"], source_filename)
     render_forge(original_df, working_df, original_findings, working_findings, source_filename)
+    st.markdown(
+        '<p class="talos-section-divider">04 · Evidence Vault</p>',
+        unsafe_allow_html=True,
+    )
     render_exports_and_report(profile, original_findings, working_findings)
     st.markdown(
-        '<p class="talos-footer">TALOS v1.1.1 · Source preserved · Repairs recorded · Nothing changed without approval</p>',
+        '<p class="talos-footer">TALOS v1.1.2 · Source preserved · Repairs recorded · Nothing changed without approval</p>',
         unsafe_allow_html=True,
     )
 

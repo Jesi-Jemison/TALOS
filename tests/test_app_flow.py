@@ -12,6 +12,7 @@ from app import (
     inspect_dataset,
     outlier_widget_key,
     repair_selection_key,
+    text_widget_key,
 )
 from src.transformations import build_suggested_transformations
 
@@ -199,6 +200,52 @@ def test_text_normalisation_requires_approval_and_updates_only_the_working_copy(
         "OPEN", "OPEN", "CLOSED"
     ]
     assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["operation"] == "normalize_text"
+
+
+def test_annual_spend_keeps_usable_iqr_actions_and_text_styles_allow_column_overrides():
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.button(key="talos-load-demo").click().run()
+
+    annual_spend = app.selectbox(key=outlier_widget_key("annual_spend"))
+    assert annual_spend.value == "Leave unchanged"
+    assert "Replace with median" in annual_spend.options
+    assert "Remove affected rows" in annual_spend.options
+
+    style_options = app.selectbox(key="talos_text_global_rule").options
+    assert set(style_options) >= {
+        "Proper Case", "Sentence case", "camelCase", "UPPERCASE", "lowercase"
+    }
+    region_rule = app.selectbox(key=text_widget_key("column_rule", "region"))
+    assert "Use global default" in region_rule.options
+    assert "Sentence case" in region_rule.options
+
+
+def test_text_normalisation_global_style_column_override_and_address_suffix_option_apply_after_approval():
+    csv = (
+        b"region,status,address\nnorth,open,10 main rd\nsouth,CLOSED,8 oak st.\n"
+    )
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("addresses.csv", csv, "text/csv")).run()
+    original = app.session_state["talos_original_df"].copy(deep=True)
+
+    app.checkbox(key="talos_text_address_suffixes").check().run()
+    assert "address" in app.multiselect(key="talos_text_selected_columns").options
+    app.multiselect(key="talos_text_selected_columns").set_value(
+        ["region", "status", "address"]
+    ).run()
+    app.selectbox(key="talos_text_global_rule").select("UPPERCASE").run()
+    app.selectbox(key=text_widget_key("column_rule", "status")).select("Sentence case").run()
+
+    assert not app.exception
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+
+    app.button(key="talos-apply-selected-repairs").click().run()
+    assert not app.exception
+    assert app.session_state["talos_working_df"]["region"].tolist() == ["NORTH", "SOUTH"]
+    assert app.session_state["talos_working_df"]["status"].tolist() == ["Open", "Closed"]
+    assert app.session_state["talos_working_df"]["address"].tolist() == [
+        "10 MAIN ROAD", "8 OAK STREET"
+    ]
 
 
 def test_optional_pdf_is_prepared_on_demand_and_appears_in_downloads():
@@ -414,6 +461,31 @@ def test_outlier_remediation_per_column_requires_approval_and_reinspects():
     app.button(key="confirm-reset").click().run()
     pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
     assert app.session_state["talos_transformation_ledger"] == []
+
+
+def test_forge_can_remove_only_negative_integer_values_and_leave_fractional_values():
+    values = [7, 4, -3, -2, -1.5]
+    csv = ("amount\n" + "\n".join(map(str, values)) + "\n").encode()
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("negative-values.csv", csv, "text/csv")).run()
+
+    selector = app.selectbox(key=outlier_widget_key("amount"))
+    assert "Remove rows with negative integer values" in selector.options
+    assert "Remove rows with negative integer outliers only" not in selector.options
+    original = app.session_state["talos_original_df"].copy(deep=True)
+
+    selector.select("Remove rows with negative integer values").run()
+    assert not app.exception
+    pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
+    assert any("2 unique rows to remove" in item.value for item in app.markdown)
+
+    app.button(key="talos-apply-selected-repairs").click().run()
+    assert not app.exception
+    assert app.session_state["talos_working_df"]["amount"].tolist()[-1] == -1.5
+    assert not app.session_state["talos_working_df"]["amount"].isin([-3, -2]).any()
+    assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["columns"][0][
+        "criteria"
+    ] == "negative_integer_values"
 
 
 def test_guardian_summary_reports_a_clean_dataset_without_false_findings():

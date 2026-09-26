@@ -1,6 +1,6 @@
 # TALOS portfolio summary
 
-**Project release: v1.1.1 · Streamlit Forge controls and report polish.**
+**Project release: v1.1.2 · Streamlit readability, numeric remediation, and text normalisation.**
 
 ## One-line version
 
@@ -8,7 +8,7 @@ TALOS is a Python and Streamlit application that inspects CSV data, explains qua
 
 ## Short project card
 
-**TALOS — Data Integrity Observation System** is a portfolio project built with Python, pandas, NumPy, Streamlit, and pytest. It profiles CSV structure; checks missingness, duplicates, category variation, outliers, and structural signals; calculates a transparent heuristic score; and exports findings as CSV, a concise PDF, a detailed HTML report, and a ZIP evidence pack. Its Streamlit Forge supports manual column removal and explicit per-column IQR actions alongside its existing repair controls. Every repair is previewed, user-approved, recorded in a transformation ledger, and followed by reinspection. The original DataFrame remains unchanged.
+**TALOS — Data Integrity Observation System** is a portfolio project built with Python, pandas, NumPy, Streamlit, and pytest. It profiles CSV structure; checks missingness, duplicates, category variation, outliers, and structural signals; calculates a transparent heuristic score; and exports findings as CSV, a concise PDF, a detailed HTML report, and a ZIP evidence pack. Its Streamlit Forge supports manual column removal, explicit per-column IQR and negative-integer actions, global and per-column text styles, and optional address-suffix normalisation. Every repair is previewed, user-approved, recorded in a transformation ledger, and followed by reinspection. The original DataFrame remains unchanged.
 
 **Live app:** https://talos-app.streamlit.app/  
 **Source:** https://github.com/Jesi-Jemison/TALOS

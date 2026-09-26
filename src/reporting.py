@@ -1,4 +1,4 @@
-"""TALOS v1.1.1 CSV exports and concise PDF / detailed HTML inspection reports."""
+"""TALOS v1.1.2 CSV exports and concise PDF / detailed HTML inspection reports."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-/* TALOS v1.1.1 interface tokens and theme-aware component styling. */
+/* TALOS v1.1.2 interface tokens and theme-aware component styling. */
 :root {
     color-scheme: dark;
     --talos-bg: #09080C;
@@ -189,6 +189,26 @@ body, .stApp {
 
 .talos-section-kicker { margin: 1.25rem 0 0.15rem; }
 
+.talos-section-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin: 2rem 0 1rem;
+    color: var(--talos-bronze-strong);
+    font-size: 0.72rem;
+    font-weight: 750;
+    letter-spacing: 0.13em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.talos-section-divider::after {
+    height: 1px;
+    flex: 1 1 auto;
+    background: linear-gradient(90deg, var(--talos-line), transparent);
+    content: "";
+}
+
 .st-key-talos-theme-control {
     display: flex;
     justify-content: flex-end;
@@ -282,9 +302,15 @@ body, .stApp {
 [data-testid="stExpander"] details > summary p,
 [data-testid="stExpander"] details > summary span,
 [data-testid="stExpander"] details > summary svg {
-    color: var(--talos-text);
+    color: var(--talos-text) !important;
     font-weight: 620;
     letter-spacing: 0.01em;
+}
+
+[data-testid="stExpander"] details > summary,
+[data-testid="stExpander"] > details,
+[data-testid="stExpander"] details[open] > div {
+    background-color: var(--talos-panel) !important;
 }
 
 [data-testid="stExpander"] details > summary:hover {
@@ -322,8 +348,12 @@ body, .stApp {
 [data-testid="stNumberInput"] input,
 [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 [data-testid="stRadio"] label,
-[data-testid="stCheckbox"] label {
-    color: var(--talos-text);
+[data-testid="stCheckbox"] label,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stSelectbox"] label,
+[data-testid="stMultiSelect"] label {
+    color: var(--talos-text) !important;
+    opacity: 1 !important;
 }
 
 [data-testid="stCaptionContainer"],
@@ -334,27 +364,40 @@ body, .stApp {
 
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
-[data-testid="stSelectbox"] [data-baseweb="select"] > div {
-    border-color: var(--talos-line);
-    background: var(--talos-input);
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+    border-color: var(--talos-line) !important;
+    background-color: var(--talos-input) !important;
+    color: var(--talos-text) !important;
+    opacity: 1 !important;
+}
+
+[data-testid="stSelectbox"] [data-baseweb="select"] span,
+[data-testid="stMultiSelect"] [data-baseweb="select"] span,
+[data-testid="stSelectbox"] [data-baseweb="select"] svg,
+[data-testid="stMultiSelect"] [data-baseweb="select"] svg {
+    color: var(--talos-text) !important;
+    fill: var(--talos-text) !important;
+    opacity: 1 !important;
 }
 
 [data-baseweb="popover"],
 [data-baseweb="menu"],
 [role="listbox"] {
-    border-color: var(--talos-line);
-    background: var(--talos-panel-raised);
-    color: var(--talos-text);
+    border-color: var(--talos-line) !important;
+    background-color: var(--talos-panel-raised) !important;
+    color: var(--talos-text) !important;
 }
 
 [data-baseweb="menu"] li,
 [role="option"] {
-    color: var(--talos-text);
+    color: var(--talos-text) !important;
+    opacity: 1 !important;
 }
 
 [data-baseweb="menu"] li:hover,
 [role="option"][aria-selected="true"] {
-    background: var(--talos-highlight);
+    background: var(--talos-highlight) !important;
 }
 
 [data-testid="stButton"] button,
