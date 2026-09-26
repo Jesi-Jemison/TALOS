@@ -32,6 +32,8 @@ Screenshots use the built-in synthetic demo data.
 
 ![Global text-style options for Proper Case, Sentence case, camelCase, upper and lowercase](assets/screenshots/talos-demo-normalisation-styles-20260926.jpg)
 
+![Optional address-suffix standardisation alongside the global text settings](assets/screenshots/talos-demo-normalisation-20260926.jpg)
+
 ![Text normalisation with optional column-by-column overrides](assets/screenshots/talos-demo-normalisation-overrides-20260926.jpg)
 
 ![Approved changes recorded in the ledger after reinspection](assets/screenshots/talos-demo-reinspection-20260925.jpg)
