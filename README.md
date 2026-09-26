@@ -26,9 +26,13 @@ Screenshots use the built-in synthetic demo data.
 
 ![TALOS Dataset Integrity Score with component weights and limitations](assets/screenshots/talos-demo-score-20260925.jpg)
 
-![Repair Plan with selected changes, expected dataset shape, and review before approval](assets/screenshots/talos-demo-forge-20260925.jpg)
+![Forge numeric remediation with readable per-column actions and clear inspection sections](assets/screenshots/talos-demo-forge-20260926.jpg)
 
 ![Manual column-removal control with all fields available and none selected by default](assets/screenshots/talos-demo-column-removal-20260925.jpg)
+
+![Global text-style options for Proper Case, Sentence case, camelCase, upper and lowercase](assets/screenshots/talos-demo-normalisation-styles-20260926.jpg)
+
+![Text normalisation with optional column-by-column overrides](assets/screenshots/talos-demo-normalisation-overrides-20260926.jpg)
 
 ![Approved changes recorded in the ledger after reinspection](assets/screenshots/talos-demo-reinspection-20260925.jpg)
 
@@ -36,7 +40,7 @@ Screenshots use the built-in synthetic demo data.
 
 The appearance preference is session-level and leaves the inspection state intact.
 
-![TALOS light appearance with a readable missing-data notice and table](assets/screenshots/talos-light-theme-20260925.jpg)
+![TALOS light appearance with readable guardian, source and integrity-score sections](assets/screenshots/talos-light-theme-20260926.jpg)
 
 ## What it does
 
@@ -148,6 +152,11 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
+The first command installs the packages TALOS needs to run the Streamlit
+product. The final command must run from the cloned `TALOS` directory, where
+`app.py` lives. Streamlit prints a local URL and a network URL; use the local
+URL on the same computer where you started the server.
+
 If the `streamlit` command is not on PATH after activation, use
 `python -m streamlit run app.py`. Open the local URL printed in the terminal,
 usually `http://localhost:8501`. Choose **Load TALOS demo dataset** to explore
@@ -155,6 +164,10 @@ the inspection and Forge, or upload a UTF-8 CSV. Uploaded files remain in the
 active app session; TALOS does not write the original CSV back to disk. Stop
 the server with **Ctrl+C** in its terminal. To use another port, run
 `python -m streamlit run app.py --server.port 8502`.
+
+For a fresh session, choose **Clear demo dataset** before uploading a file.
+The demo is synthetic and can be used to walk through inspection, repair
+selection, approval, reinspection, and exports without preparing a CSV first.
 
 To restart later, open a terminal in the repository, activate `.venv` using
 the command for your operating system above, and run the Streamlit command
