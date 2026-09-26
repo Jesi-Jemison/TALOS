@@ -1,0 +1,2 @@
+# TALOS FILE VERSION: v1.2.0
+# Sidecar marker keeps the CSV header and records valid for ordinary CSV readers.

@@ -1,4 +1,5 @@
 """Tests for the custom, transparent TALOS score."""
+# TALOS FILE VERSION: v1.2.0
 
 import pandas as pd
 import pytest

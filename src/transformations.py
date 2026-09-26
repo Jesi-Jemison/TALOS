@@ -1,4 +1,5 @@
-"""TALOS v1.1.2 copy-returning repairs and approved transformation records."""
+"""TALOS FILE VERSION: v1.2.0. Copy-returning repairs and approved records."""
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 

@@ -4,6 +4,7 @@ The Streamlit app and Python callers share the same inspection, transformation,
 reporting, and evidence functions. This module owns only the glue between those
 existing components; it contains no widgets, session state, or UI rendering.
 """
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 

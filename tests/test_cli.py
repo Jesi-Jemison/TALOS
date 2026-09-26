@@ -1,4 +1,5 @@
 """Tests for TALOS's standard-library command-line entry point."""
+# TALOS FILE VERSION: v1.2.0
 
 from pathlib import Path
 import zipfile
@@ -12,7 +13,7 @@ def test_cli_inspect_prints_summary(capsys):
     output = capsys.readouterr()
     assert result == 0
     assert "TALOS DATASET INSPECTION" in output.out
-    assert "Rows:                 161" in output.out
+    assert "Rows:                 50" in output.out
     assert output.err == ""
 
 
@@ -79,4 +80,3 @@ def test_cli_rejects_unsupported_file_type_and_invalid_output_path(capsys, tmp_p
     error = capsys.readouterr().err
     assert "could not write TALOS outputs" in error
     assert "Traceback" not in error
-

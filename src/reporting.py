@@ -1,4 +1,5 @@
-"""TALOS v1.1.2 CSV exports and concise PDF / detailed HTML inspection reports."""
+"""TALOS FILE VERSION: v1.2.0. Exports and concise PDF / detailed HTML reports."""
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ import base64
 import html
 import json
 from datetime import datetime, timezone
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -165,6 +166,7 @@ def build_export_filename(original_filename: str, export_type: str) -> str:
         stem = "dataset"
     suffixes = {
         "cleaned": "cleaned.csv",
+        "cleaned_excel": "cleaned.xlsx",
         "transformations": "transformations.csv",
         "report": "report.html",
         "pdf_report": "report.pdf",
@@ -198,6 +200,16 @@ def build_cleaned_csv(df: pd.DataFrame) -> bytes:
     buffer = StringIO()
     df.to_csv(buffer, index=False)
     return buffer.getvalue().encode("utf-8")
+
+
+def build_cleaned_excel(df: pd.DataFrame, sheet_name: str = "TALOS Working Copy") -> bytes:
+    """Serialize a working copy as an index-free XLSX worksheet."""
+    safe_sheet_name = str(sheet_name).translate(str.maketrans({"[": "(", "]": ")", ":": "-", "*": "-", "?": "-", "/": "-", "\\": "-"}))[:31]
+    safe_sheet_name = safe_sheet_name or "TALOS Working Copy"
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
+    return buffer.getvalue()
 
 
 def build_transformation_log(ledger: list[dict[str, Any]]) -> pd.DataFrame:
@@ -476,6 +488,77 @@ def _approved_change_count(items: list[dict[str, Any]]) -> int:
     return total
 
 
+def _normalisation_report_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    """Summarise lexical overrides without listing individual source values."""
+    from .transformations import normalize_text_value
+
+    global_rule = str(parameters.get("global_rule", ""))
+    whitespace = parameters.get("whitespace", {}) or {}
+    address_aliases = bool(parameters.get("standardize_address_suffixes", False))
+    column_rules = {
+        str(column): str(rule)
+        for column, rule in (parameters.get("column_rules", {}) or {}).items()
+        if str(rule) != global_rule
+    }
+    value_counts: dict[str, dict[str, int]] = {}
+    for item in parameters.get("value_overrides", []) or []:
+        column = str(item.get("column", ""))
+        mode = str(item.get("mode", ""))
+        original = str(item.get("original", ""))
+        default_output = str(
+            normalize_text_value(
+                original,
+                global_rule,
+                **{key: bool(value) for key, value in whitespace.items()},
+                standardize_address_suffixes=address_aliases,
+            )
+        )
+        if mode == "custom":
+            differs = str(item.get("value", "")) != default_output
+            label = "custom canonical values"
+        elif mode == "rule":
+            chosen_rule = str(item.get("rule", global_rule))
+            chosen_output = str(
+                normalize_text_value(
+                    original,
+                    chosen_rule,
+                    **{key: bool(value) for key, value in whitespace.items()},
+                    standardize_address_suffixes=address_aliases,
+                )
+            )
+            differs = chosen_output != default_output
+            label = "alternate value rules"
+        else:
+            differs = False
+            label = ""
+        if differs:
+            bucket = value_counts.setdefault(column, {})
+            bucket[label] = bucket.get(label, 0) + 1
+    return {
+        "global_rule": global_rule,
+        "column_overrides": column_rules,
+        "value_exception_counts": value_counts,
+        "whitespace": whitespace,
+        "standardize_address_suffixes": address_aliases,
+        "affected_values": int(parameters.get("affected_values", 0)),
+        "affected_cells": int(parameters.get("affected_cells", 0)),
+    }
+
+
+def _report_parameters(record: dict[str, Any]) -> dict[str, Any]:
+    """Return compact, privacy-conscious parameters for human-readable reports."""
+    parameters = record.get("parameters", {}) or {}
+    if _operation_name(record) == "normalize_text":
+        return _normalisation_report_parameters(parameters)
+    return parameters
+
+
+def _operation_name(record: dict[str, Any]) -> str:
+    """Resolve an operation label across current and legacy ledger records."""
+    parameters = record.get("parameters", {}) or {}
+    return str(parameters.get("operation", record.get("transformation_type", "")))
+
+
 def _score_summary_value(summary: dict[str, Any]) -> str:
     """Format a score for narrative report copy."""
     score = summary.get("score")
@@ -558,8 +641,16 @@ def build_inspection_report_html(
             item.get("column", ""),
             item.get("affected_rows", 0),
             item.get("description", ""),
-            json.dumps(item.get("parameters", {}), ensure_ascii=False, default=str),
-            json.dumps(item.get("before_after", []), ensure_ascii=False, default=str),
+            json.dumps(_report_parameters(item), ensure_ascii=False, default=str),
+            json.dumps(
+                (
+                    {"summary": "Individual text values omitted; see transformation log export."}
+                    if _operation_name(item) == "normalize_text"
+                    else item.get("before_after", [])
+                ),
+                ensure_ascii=False,
+                default=str,
+            ),
         ]
         for item in ledger
     ]
@@ -704,6 +795,7 @@ def build_inspection_report_html(
   </section>
   <section><h2>Source</h2><div class="meta-grid">
     <div><span>Filename</span><strong>{_escape(profile['file_name'])}</strong></div>
+    {f"<div><span>Worksheet</span><strong>{_escape(profile['sheet_name'])}</strong></div>" if profile.get('sheet_name') else ""}
     <div><span>File size</span><strong>{_escape(profile['file_size'])}</strong></div>
     <div><span>Rows</span><strong>{profile['row_count']}</strong></div>
     <div><span>Columns</span><strong>{profile['column_count']}</strong></div>
@@ -931,7 +1023,7 @@ def build_inspection_report_pdf(
         }
         for item in items:
             parameters = item.get("parameters", {})
-            operation = parameters.get("operation", "")
+            operation = _operation_name(item)
             if operation == "remediate_outliers":
                 for column in parameters.get("columns", []):
                     count = int(column.get("outlier_count", 0))
@@ -981,7 +1073,21 @@ def build_inspection_report_pdf(
             elif operation == "normalize_text":
                 count = int(parameters.get("affected_values", 0))
                 fields = ", ".join(map(str, parameters.get("selected_columns", [])[:4]))
-                bullets.append(f"{count:,} text values normalised" + (f" across {fields}" if fields else ""))
+                report_parameters = _normalisation_report_parameters(parameters)
+                bullet = f"{count:,} distinct text values normalised" + (f" across {fields}" if fields else "")
+                if report_parameters["column_overrides"]:
+                    overrides = ", ".join(
+                        f"{column}: {rule}"
+                        for column, rule in report_parameters["column_overrides"].items()
+                    )
+                    bullet += f"; column styles differing from the global default ({parameters.get('global_rule')}): {overrides}"
+                if report_parameters["value_exception_counts"]:
+                    exception_count = sum(
+                        sum(counts.values())
+                        for counts in report_parameters["value_exception_counts"].values()
+                    )
+                    bullet += f"; {exception_count:,} value exceptions differ from the global default"
+                bullets.append(bullet)
             else:
                 label = str(item.get("transformation_type", item.get("action", "Approved repair")))
                 column = str(item.get("column", ""))
@@ -1071,6 +1177,7 @@ def build_inspection_report_pdf(
     story.append(Paragraph("Source", section_style))
     source_rows = [
         ["Filename", profile.get("file_name", "")],
+        *([["Worksheet", profile["sheet_name"]]] if profile.get("sheet_name") else []),
         ["File size", profile.get("file_size", "")],
         ["Source rows", f"{rows_count:,}"],
         ["Source columns", f"{columns_count:,}"],

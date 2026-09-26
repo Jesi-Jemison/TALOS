@@ -1,4 +1,5 @@
 """Tests for TALOS's compact, session-independent theme token system."""
+# TALOS FILE VERSION: v1.2.0
 
 from pathlib import Path
 
