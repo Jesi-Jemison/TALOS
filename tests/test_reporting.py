@@ -1,4 +1,5 @@
 """Tests for TALOS CSV exports and printable HTML inspection reports."""
+# TALOS FILE VERSION: v1.2.0
 
 from io import BytesIO
 from html.parser import HTMLParser
@@ -17,13 +18,14 @@ from src.quality_checks import (
 from src.reporting import (
     TRANSFORMATION_LOG_COLUMNS,
     build_cleaned_csv,
+    build_cleaned_excel,
     build_export_filename,
     build_inspection_report_html,
     build_inspection_report_pdf,
     build_transformation_log,
 )
 from src.scoring import calculate_integrity_score
-from src.transformations import apply_transformation
+from src.transformations import apply_transformation, build_text_normalisation_plan
 
 
 def build_findings(df):
@@ -106,6 +108,64 @@ def test_cleaned_csv_exports_approved_working_copy_without_touching_original():
 
     assert exported["region"].tolist() == ["Sydney", "Sydney"]
     pd.testing.assert_frame_equal(original, original_copy)
+
+
+def test_cleaned_excel_keeps_a_named_sheet_and_export_filename():
+    working = pd.DataFrame({"deity": ["Athena"], "count": [1]})
+    exported = build_cleaned_excel(working, "Inspection Data")
+    round_trip = pd.read_excel(BytesIO(exported), sheet_name="Inspection Data")
+
+    pd.testing.assert_frame_equal(round_trip, working)
+    assert build_export_filename("/private/myth.xlsx", "cleaned_excel") == "myth_talos_cleaned.xlsx"
+
+
+def test_reports_name_selected_worksheet_and_summarise_only_different_text_overrides():
+    original = pd.DataFrame({"status": ["OPEN", "special value", "CLOSED"]})
+    findings = build_findings(original)
+    profile = profile_dataset(original, "status.xlsx", 1024, "Inspection Data")
+    summary = {
+        "row_count": len(original),
+        "column_count": len(original.columns),
+        "missing_cells": findings["missing"]["total_missing_cells"],
+        "duplicate_rows": findings["duplicates"]["exact_duplicate_row_count"],
+        "score": findings["score"]["score"],
+    }
+    plan = build_text_normalisation_plan(
+        original,
+        "lowercase",
+        ["status"],
+        column_rules={"status": "Proper Case"},
+        value_overrides={
+            "status": {
+                "special value": {
+                    "mode": "custom",
+                    "value": "PRIVATE_CANONICAL_VALUE",
+                }
+            }
+        },
+    )
+    working, record = apply_transformation(
+        original,
+        {"type": "normalize_text", "plan": plan},
+    )
+    working_findings = build_findings(working)
+    working_summary = {
+        "row_count": len(working),
+        "column_count": len(working.columns),
+        "missing_cells": working_findings["missing"]["total_missing_cells"],
+        "duplicate_rows": working_findings["duplicates"]["exact_duplicate_row_count"],
+        "score": working_findings["score"]["score"],
+    }
+    report = build_inspection_report_html(
+        profile, findings, working_findings, summary, working_summary, [record]
+    )
+
+    assert "Inspection Data" in report
+    assert "Proper Case" in report
+    assert "custom canonical values" in report
+    assert "status" in report
+    assert "PRIVATE_CANONICAL_VALUE" not in report
+    assert "special value" not in report
 
 
 def test_transformation_log_has_stable_columns_and_serializes_parameters():

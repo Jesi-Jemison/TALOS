@@ -1,4 +1,5 @@
-"""CSV intake and basic dataset profiling for TALOS."""
+"""TALOS FILE VERSION: v1.2.0. CSV/Excel intake and dataset profiling."""
+# TALOS FILE VERSION: v1.2.0
 
 from io import BytesIO
 
@@ -24,6 +25,39 @@ def load_csv(file_contents: bytes) -> pd.DataFrame:
         return pd.read_csv(BytesIO(file_contents), encoding="utf-8-sig")
     except UnicodeDecodeError:
         return pd.read_csv(BytesIO(file_contents), encoding="latin-1")
+
+
+def list_excel_sheets(file_contents: bytes) -> list[str]:
+    """Return worksheet names from an uploaded Excel workbook in memory."""
+    if not file_contents:
+        raise ValueError("The uploaded workbook is empty.")
+    try:
+        with pd.ExcelFile(BytesIO(file_contents)) as workbook:
+            sheets = list(workbook.sheet_names)
+    except Exception as error:
+        raise ValueError(
+            "TALOS could not open this Excel workbook. Check that it is a supported, unencrypted .xlsx, .xlsm, or .xls file."
+        ) from error
+    if not sheets:
+        raise ValueError("This workbook does not contain any worksheets.")
+    return sheets
+
+
+def load_excel(file_contents: bytes, sheet_name: str) -> pd.DataFrame:
+    """Load one explicitly selected workbook sheet without writing to disk."""
+    if not file_contents:
+        raise ValueError("The uploaded workbook is empty.")
+    try:
+        with pd.ExcelFile(BytesIO(file_contents)) as workbook:
+            if sheet_name not in workbook.sheet_names:
+                raise ValueError(f"Worksheet {sheet_name!r} is not in this workbook.")
+            return pd.read_excel(workbook, sheet_name=sheet_name)
+    except ValueError:
+        raise
+    except Exception as error:
+        raise ValueError(
+            "TALOS could not read the selected worksheet. Check that the workbook is supported and not encrypted or damaged."
+        ) from error
 
 
 def _classify_series(series: pd.Series) -> str:
@@ -79,6 +113,7 @@ def profile_dataset(
     df: pd.DataFrame,
     file_name: str,
     file_size_bytes: int,
+    sheet_name: str | None = None,
 ) -> dict[str, object]:
     """Summarise file metadata, dataset dimensions, and broad column types.
 
@@ -98,6 +133,7 @@ def profile_dataset(
 
     return {
         "file_name": file_name,
+        "sheet_name": sheet_name,
         "file_size": format_file_size(file_size_bytes),
         "row_count": len(df.index),
         "column_count": len(df.columns),

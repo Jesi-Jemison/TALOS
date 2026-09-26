@@ -1,4 +1,5 @@
 """Tests for the Streamlit-independent TALOS Python workflow."""
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ def test_from_csv_inspection_findings_score_and_summary():
     session = TalosSession.from_csv(DEMO_CSV)
 
     assert session.profile["file_name"] == "talos_demo.csv"
-    assert session.profile["row_count"] == 161
+    assert session.profile["row_count"] == 50
     assert session.original_findings is None
     findings = session.inspect()
 
@@ -38,7 +39,7 @@ def test_from_csv_inspection_findings_score_and_summary():
     assert session.integrity_score == findings["score"]["score"]
     assert session.working_integrity_score == session.integrity_score
     assert "TALOS DATASET INSPECTION" in session.summary()
-    assert "Rows:                 161" in session.summary()
+    assert "Rows:                 50" in session.summary()
 
 
 def test_from_dataframe_protects_source_and_returns_defensive_snapshots():
@@ -228,7 +229,7 @@ def test_existing_transformations_can_be_previewed_and_applied(
 def test_export_methods_write_reports_tables_and_evidence_pack(tmp_path):
     session = TalosSession.from_csv(DEMO_CSV)
     session.inspect()
-    plan = session.preview({"type": "normalize_whitespace", "column": "region"})
+    plan = session.preview({"type": "normalize_whitespace", "column": "deity_class"})
     session.apply(plan)
     session.reinspect()
 

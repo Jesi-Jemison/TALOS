@@ -1,4 +1,5 @@
-"""TALOS v1.1.2 Streamlit interface for inspection and review-first repair."""
+"""TALOS v1.2.0 Streamlit interface for guided inspection and approved repair."""
+# TALOS FILE VERSION: v1.2.0
 
 import base64
 import hashlib
@@ -11,9 +12,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import altair as alt
 from pandas.api.types import is_bool_dtype, is_numeric_dtype, is_object_dtype, is_string_dtype
 
-from src.profiler import identify_column_types, load_csv, profile_dataset
+from src.profiler import identify_column_types, list_excel_sheets, load_csv, load_excel, profile_dataset
 from src.evidence import (
     build_category_variants_table,
     build_comparison_table,
@@ -33,6 +35,7 @@ from src.workflow import inspect_dataset, summarize_dataset
 from src.theme import DEFAULT_THEME, theme_token_css, theme_tokens
 from src.reporting import (
     build_cleaned_csv,
+    build_cleaned_excel,
     build_export_filename,
     build_inspection_report_pdf,
     build_inspection_report_html,
@@ -53,7 +56,79 @@ from src.transformations import (
 
 
 logger = logging.getLogger(__name__)
-SESSION_PREFERENCE_KEYS = {"talos_theme_preference", "talos_demo_loaded"}
+SESSION_PREFERENCE_KEYS = {
+    "talos_theme_preference",
+    "talos_demo_loaded",
+    "talos_selected_sheet",
+    "talos_workbook_fingerprint",
+    "talos_workbook_sheets",
+}
+FLOW_STEPS = (
+    "Present a source",
+    "First Watch",
+    "The Forge",
+    "Reinspection & Range Watch",
+    "Evidence Vault",
+)
+
+
+def details_expanded() -> bool:
+    """Return the session-wide default for expandable supporting details."""
+    return bool(st.session_state.get("talos_expand_all_details", False))
+
+
+def _set_flow_step(step: int) -> None:
+    """Navigate to a step the session has already reached."""
+    maximum = int(st.session_state.get("talos_flow_max_step", 0))
+    if 0 <= int(step) <= maximum:
+        st.session_state["talos_flow_step"] = int(step)
+
+
+def _advance_flow(step: int) -> None:
+    """Advance the guided workflow and retain its furthest completed step."""
+    step = max(0, min(int(step), len(FLOW_STEPS) - 1))
+    st.session_state["talos_flow_step"] = step
+    st.session_state["talos_flow_max_step"] = max(
+        int(st.session_state.get("talos_flow_max_step", 0)), step
+    )
+
+
+def render_step_navigation() -> None:
+    """Show the five-stage route, status, and navigation to completed stages."""
+    current = int(st.session_state.get("talos_flow_step", 0))
+    maximum = int(st.session_state.get("talos_flow_max_step", current))
+    st.markdown('<p class="talos-section-kicker">Inspection route</p>', unsafe_allow_html=True)
+    columns = st.columns(len(FLOW_STEPS), gap="small")
+    for index, (container, label) in enumerate(zip(columns, FLOW_STEPS)):
+        status = "Active" if index == current else "Complete" if index < maximum else "Upcoming"
+        marker = "✓" if status == "Complete" else "●" if status == "Active" else "○"
+        with container:
+            st.button(
+                f"{marker} {index + 1} · {label}",
+                key=f"talos-flow-step-{index}",
+                type="primary" if index == current else "secondary",
+                disabled=index > maximum,
+                on_click=_set_flow_step,
+                args=(index,),
+                use_container_width=True,
+                help=f"{status} step",
+            )
+            st.caption(status)
+
+
+def render_detail_controls() -> None:
+    """Expand or collapse supporting panels without affecting navigation/actions."""
+    controls = st.columns([1, 1, 4])
+    controls[0].button(
+        "Expand all details",
+        key="talos-expand-all-details",
+        on_click=lambda: st.session_state.__setitem__("talos_expand_all_details", True),
+    )
+    controls[1].button(
+        "Collapse all details",
+        key="talos-collapse-all-details",
+        on_click=lambda: st.session_state.__setitem__("talos_expand_all_details", False),
+    )
 
 
 def load_stylesheet(theme: str = DEFAULT_THEME) -> None:
@@ -356,8 +431,9 @@ def render_check_context(checked: str, why: str, limits: str) -> None:
 def render_source_status(profile: dict[str, object], df: pd.DataFrame, demo: bool) -> None:
     """Show the active source and preservation state near the top of the inspection."""
     label = "Synthetic demo · talos_demo.csv" if demo else str(profile["file_name"])
+    sheet = f" · worksheet: {profile['sheet_name']}" if profile.get("sheet_name") else ""
     st.markdown(
-        f"**Source received** · {label} · {len(df.index):,} rows × {len(df.columns):,} columns · source preserved"
+        f"**Source received** · {label}{sheet} · {len(df.index):,} rows × {len(df.columns):,} columns · source preserved"
     )
 
 
@@ -377,7 +453,7 @@ def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None
         "Dataset Overview & Structure · "
         f"{count_label(int(profile['row_count']), 'row')} · "
         f"{count_label(int(profile['column_count']), 'column')}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.markdown('<p class="talos-section-kicker">Structural inspection</p>', unsafe_allow_html=True)
         st.subheader("Dataset Overview")
@@ -401,7 +477,7 @@ def render_dataset_profile(profile: dict[str, object], df: pd.DataFrame) -> None
     preview_count = min(10, len(df.index))
     with st.expander(
         f"Data Preview · first {count_label(preview_count, 'row')}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.caption("A source sample for review. TALOS leaves these values unchanged during inspection.")
         render_dataframe(df.head(10), width="stretch", hide_index=True)
@@ -414,7 +490,7 @@ def render_missing_data(
     with st.expander(
         f"Missing Data · {count_label(int(analysis['affected_column_count']), 'affected column')} · "
         f"{analysis['missing_percentage']:.1f}% of cells",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.markdown('<p class="talos-section-kicker">Completeness</p>', unsafe_allow_html=True)
         st.subheader("Missing Data")
@@ -452,7 +528,7 @@ def render_duplicate_checks(
         f"Duplicate Inspection · "
         f"{count_label(int(analysis['exact_duplicate_row_count']), 'exact duplicate row')} · "
         f"{count_label(int(analysis['identifier_candidate_count']), 'identifier-name candidate')}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.markdown('<p class="talos-section-kicker">Record repetition</p>', unsafe_allow_html=True)
         st.subheader("Duplicate Inspection")
@@ -503,7 +579,7 @@ def render_category_consistency(
         f"Category Consistency · "
         f"{count_label(int(analysis['inconsistent_group_count']), 'variant group')} · "
         f"{count_label(len(analysis['checked_columns']), 'text column')} checked",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.markdown('<p class="talos-section-kicker">Category variation</p>', unsafe_allow_html=True)
         st.subheader("Category Consistency")
@@ -550,13 +626,15 @@ def render_numeric_outliers(
     analysis: dict[str, object],
     df: pd.DataFrame | None = None,
     source_filename: str = "dataset.csv",
+    *,
+    expanded: bool | None = None,
 ) -> None:
     """Render IQR summaries and explain which numeric fields were skipped."""
     with st.expander(
         f"Numeric Outliers · "
         f"{count_label(int(analysis['total_outlier_values']), 'IQR flag')} · "
         f"{count_label(int(analysis['eligible_column_count']), 'eligible column')}",
-        expanded=False,
+        expanded=details_expanded() if expanded is None else expanded,
     ):
         st.markdown('<p class="talos-section-kicker">Range Watch</p>', unsafe_allow_html=True)
         st.subheader("Numeric Outliers")
@@ -604,9 +682,13 @@ def render_numeric_outliers(
                 "the CSV contains every flagged value."
             )
             render_dataframe(outlier_rows.head(20), width="stretch", hide_index=True)
+            if df is not None:
+                _render_outlier_charts(df, analysis)
         elif analysis["eligible_column_count"]:
             st.success("No signal raised. No IQR outliers were found in the eligible numeric columns.")
             st.caption("No flagged-value evidence to export.")
+            if df is not None:
+                _render_outlier_charts(df, analysis)
         else:
             st.info("No numeric columns met the minimum requirements for IQR inspection.")
 
@@ -618,6 +700,71 @@ def render_numeric_outliers(
                 render_dataframe(skipped, width="stretch", hide_index=True)
 
 
+def _render_outlier_charts(
+    df: pd.DataFrame, analysis: dict[str, object]
+) -> None:
+    """Plot sampled numeric distributions while retaining every flagged value in evidence tables."""
+    tokens = theme_tokens(st.session_state.get("talos_theme_preference", DEFAULT_THEME))
+    st.markdown("**Distribution charts · flagged values and IQR bounds**")
+    st.caption(
+        "Charts show at most 3,000 representative points per field so large uploads stay responsive. "
+        "The adjacent table and downloadable evidence retain the complete flagged-value list."
+    )
+    for item in analysis.get("columns", []):
+        column = str(item["column"])
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        )
+        finite_positions = np.flatnonzero(np.isfinite(values))
+        if not len(finite_positions):
+            continue
+        lower = float(item["lower_bound"])
+        upper = float(item["upper_bound"])
+        flagged_mask = (values < lower) | (values > upper)
+        flagged_positions = finite_positions[flagged_mask[finite_positions]]
+        typical_positions = finite_positions[~flagged_mask[finite_positions]]
+        if len(typical_positions) > 3000:
+            typical_positions = np.random.default_rng(0).choice(
+                typical_positions, size=3000, replace=False
+            )
+        if len(flagged_positions) > 1000:
+            flagged_positions = np.random.default_rng(1).choice(
+                flagged_positions, size=1000, replace=False
+            )
+        positions = np.concatenate([typical_positions, flagged_positions])
+        points = pd.DataFrame(
+            {
+                "Source row": positions + 1,
+                "Value": values[positions],
+                "Review": np.where(flagged_mask[positions], "Flagged", "Within IQR"),
+            }
+        )
+        point_chart = alt.Chart(points).mark_circle(size=42, opacity=0.78).encode(
+            x=alt.X("Source row:Q", title="Source row position"),
+            y=alt.Y("Value:Q", title=column),
+            color=alt.Color(
+                "Review:N",
+                scale=alt.Scale(
+                    domain=["Within IQR", "Flagged"],
+                    range=[tokens["talos-violet"], "#B34B35"],
+                ),
+                legend=alt.Legend(title="IQR review"),
+            ),
+            tooltip=["Source row:Q", "Value:Q", "Review:N"],
+        )
+        bounds = pd.DataFrame({"IQR bound": [lower, upper]})
+        bound_chart = alt.Chart(bounds).mark_rule(
+            color="#A45A26", strokeDash=[6, 4], strokeWidth=2
+        ).encode(y=alt.Y("IQR bound:Q"))
+        chart = (point_chart + bound_chart).properties(
+            height=210,
+            title=f"{column} · {int(item['outlier_count']):,} flagged values",
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
+
+
 def render_structural_signals(
     analysis: dict[str, object], source_filename: str = "dataset.csv"
 ) -> None:
@@ -625,7 +772,7 @@ def render_structural_signals(
     signal_count = len(build_structural_findings_table(analysis))
     with st.expander(
         f"Structural & Identifier Checks · {count_label(signal_count, 'contextual signal')}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         render_check_context(
             "TALOS looks for empty fields, constant columns, high-cardinality text, possible identifiers, and numeric patterns.",
@@ -753,7 +900,7 @@ def render_integrity_score(
     )
     with st.expander(
         f"Score components · {analysis['score']} / 100 · {analysis['band']}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         rows = build_integrity_score_table(analysis)
         rows["Weight"] = rows["Weight"].map(lambda value: f"{value}%")
@@ -792,6 +939,9 @@ def initialize_dataset_state(file_fingerprint: str, uploaded_df: pd.DataFrame) -
     st.session_state["talos_reset_confirmation"] = False
     st.session_state["talos_notice"] = ""
     st.session_state["talos_data_revision"] = 0
+    st.session_state["talos_flow_step"] = 1
+    st.session_state["talos_flow_max_step"] = 1
+    st.session_state["talos_expand_all_details"] = False
     return True
 
 
@@ -903,7 +1053,7 @@ def text_widget_key(kind: str, column: str, value: str = "") -> str:
 
 def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | None:
     """Render a preview-first lexical plan and return its approved action proposal."""
-    with st.expander("Text Normalisation", expanded=False):
+    with st.expander("Text Normalisation", expanded=details_expanded()):
         st.markdown("Set one default style, then override individual columns where needed.")
         st.caption("TALOS previews every mapping. Nothing reaches the working copy until you approve the Repair Plan.")
 
@@ -990,7 +1140,7 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
         column_rules: dict[str, str] = {}
         with st.expander(
             "Override the global style by column",
-            expanded=bool(selected_columns) and len(selected_columns) <= 8,
+            expanded=details_expanded() or (bool(selected_columns) and len(selected_columns) <= 8),
         ):
             if not selected_columns:
                 st.caption("Select one or more columns to set column-level rules.")
@@ -1022,7 +1172,7 @@ def render_text_normalisation(working_df: pd.DataFrame) -> dict[str, object] | N
                     if isinstance(value, str) and int(count) > 0
                 }
                 values = sorted(string_counts, key=lambda item: (item.casefold(), item))
-                with st.expander(f"{column} · {len(values):,} distinct text values", expanded=False):
+                with st.expander(f"{column} · {len(values):,} distinct text values", expanded=details_expanded()):
                     if len(values) > 1000:
                         st.warning(
                             "This field has many distinct values. The editor shows 20 per page; use search to find a specific value."
@@ -1266,7 +1416,10 @@ def _has_negative_integer_values(df: pd.DataFrame) -> bool:
 
 
 def render_outlier_remediation(
-    working_df: pd.DataFrame, findings: dict[str, dict[str, object]]
+    working_df: pd.DataFrame,
+    findings: dict[str, dict[str, object]],
+    *,
+    expanded: bool | None = None,
 ) -> dict[str, object] | None:
     """Collect explicit per-column IQR and negative-integer repair choices."""
     iqr_findings = {
@@ -1317,7 +1470,7 @@ def render_outlier_remediation(
         "Numeric remediation · "
         f"{count_label(total_iqr_outliers, 'IQR-flagged value')} · "
         f"{count_label(negative_integer_total, 'negative integer value')}",
-        expanded=False,
+        expanded=details_expanded() if expanded is None else expanded,
     ):
         st.caption(
             "IQR choices act on statistical outliers. Negative-integer choices target exact whole-number values below zero, either across the column or only where they also cross the IQR bounds. "
@@ -1393,7 +1546,7 @@ def render_outlier_remediation(
         st.markdown("**Outlier preview**")
         st.write(
             f"{plan['affected_values']:,} matched values affected · "
-            f"{plan['unique_rows_removed']:,} unique rows to remove"
+            f"{count_label(int(plan['unique_rows_removed']), 'unique row')} to remove"
             + (
                 f" · {plan['overlap_rows_removed']:,} overlapping row flags counted once"
                 if plan["overlap_rows_removed"]
@@ -1466,7 +1619,7 @@ def render_manual_column_removal(
         for column in suggested_columns
         if str(column) in columns
     ]
-    with st.expander("Remove columns · user-selected", expanded=False):
+    with st.expander("Remove columns · user-selected", expanded=details_expanded()):
         st.caption(
             "TALOS cannot know which fields matter to your analysis. Every column is available; "
             "none is selected by default."
@@ -1526,16 +1679,21 @@ def apply_selected_repairs(actions: tuple[dict[str, object], ...]) -> None:
     st.session_state["talos_transformation_ledger"] = updated_ledger
     update_working_inspection(updated_df)
     clear_repair_widget_state()
+    next_step = int(st.session_state.pop("talos_pending_repair_next_step", 3))
+    _advance_flow(next_step)
     st.session_state["talos_notice"] = (
         f"{count_label(len(records), 'approved change')} recorded in the Transformation Ledger. "
-        "The working copy has returned to inspection."
+        "The source remains preserved; the working copy has been reinspected."
     )
 
 
-def queue_selected_repairs(actions: tuple[dict[str, object], ...]) -> None:
+def queue_selected_repairs(
+    actions: tuple[dict[str, object], ...], after_step: int = 3
+) -> None:
     """Queue an approved repair batch so it can run with visible status text."""
     if actions:
         st.session_state["talos_pending_repair_actions"] = actions
+        st.session_state["talos_pending_repair_next_step"] = int(after_step)
 
 
 def reset_working_copy_callback() -> None:
@@ -1545,6 +1703,10 @@ def reset_working_copy_callback() -> None:
     st.session_state["talos_working_df"] = reset_df
     st.session_state["talos_transformation_ledger"] = []
     st.session_state["talos_reset_confirmation"] = False
+    st.session_state["talos_flow_step"] = 1
+    st.session_state["talos_flow_max_step"] = max(
+        1, int(st.session_state.get("talos_flow_max_step", 1))
+    )
     st.session_state["talos_working_findings"] = st.session_state["talos_original_findings"]
     st.session_state["talos_data_revision"] = st.session_state.get("talos_data_revision", 0) + 1
     invalidate_export_cache()
@@ -1553,7 +1715,11 @@ def reset_working_copy_callback() -> None:
 
 
 def render_repair_control_center(
-    working_df: pd.DataFrame, findings: dict[str, dict[str, object]]
+    working_df: pd.DataFrame,
+    findings: dict[str, dict[str, object]],
+    *,
+    include_outliers: bool = True,
+    after_step: int = 3,
 ) -> None:
     """Render grouped repair selections, an explicit plan, and one apply action."""
     suggestions = build_suggested_transformations(working_df, findings)
@@ -1564,7 +1730,9 @@ def render_repair_control_center(
     has_iqr_outliers = any(
         int(item["outlier_count"]) > 0 for item in findings["outliers"]["columns"]
     )
-    has_outlier_options = has_iqr_outliers or _has_negative_integer_values(working_df)
+    has_outlier_options = include_outliers and (
+        has_iqr_outliers or _has_negative_integer_values(working_df)
+    )
     missing_columns = [
         str(column)
         for column in working_df.columns
@@ -1632,7 +1800,7 @@ def render_repair_control_center(
     )
 
     selected_actions: list[dict[str, object]] = []
-    with st.expander(f"Text & whitespace · {len(whitespace)} proposed", expanded=False):
+    with st.expander(f"Text & whitespace · {len(whitespace)} proposed", expanded=details_expanded()):
         if not whitespace:
             st.caption("No whitespace changes are needed in the current working copy.")
         elif len(whitespace) > 1:
@@ -1660,7 +1828,7 @@ def render_repair_control_center(
                 action["label"] = f"Normalize whitespace · {column}"
                 selected_actions.append(action)
 
-    with st.expander(f"Category normalisation · {len(categories)} proposed", expanded=False):
+    with st.expander(f"Category normalisation · {len(categories)} proposed", expanded=details_expanded()):
         if not categories:
             st.caption("No category-variant repairs are currently proposed.")
         elif len(categories) > 1:
@@ -1708,7 +1876,7 @@ def render_repair_control_center(
                 action["label"] = f"Consolidate {column} variants to {canonical}"
                 selected_actions.append(action)
 
-    with st.expander(f"Missing values · {len(missing_columns)} columns", expanded=False):
+    with st.expander(f"Missing values · {len(missing_columns)} columns", expanded=details_expanded()):
         if not missing_columns:
             st.caption("No missing values remain in the current working copy.")
         for column in missing_columns:
@@ -1766,7 +1934,7 @@ def render_repair_control_center(
                 else:
                     st.caption("No action selected — this field stays as found.")
 
-    with st.expander(f"Exact duplicates · {len(duplicates)} proposed", expanded=False):
+    with st.expander(f"Exact duplicates · {len(duplicates)} proposed", expanded=details_expanded()):
         if not duplicates:
             st.caption("No exact duplicate-row removal is currently proposed.")
         elif len(duplicates) > 1:
@@ -1793,12 +1961,14 @@ def render_repair_control_center(
                 action["label"] = "Remove exact duplicate rows"
                 selected_actions.append(action)
 
-    outlier_action = render_outlier_remediation(working_df, findings)
+    outlier_action = (
+        render_outlier_remediation(working_df, findings) if include_outliers else None
+    )
     manual_column_action = render_manual_column_removal(working_df, findings)
     if manual_column_action is not None:
         selected_actions.append(manual_column_action)
 
-    with st.expander(f"Empty columns · {len(empty_columns)} proposed", expanded=False):
+    with st.expander(f"Empty columns · {len(empty_columns)} proposed", expanded=details_expanded()):
         if not empty_columns:
             st.caption("No completely empty columns are currently proposed for removal.")
         for suggestion in empty_columns:
@@ -1870,7 +2040,7 @@ def render_repair_control_center(
     )
 
     for action, record in zip(selected_actions, plan["records"]):
-        with st.expander(f"Preview · {action.get('label', action['type'])}", expanded=False):
+        with st.expander(f"Preview · {action.get('label', action['type'])}", expanded=details_expanded()):
             action_type = action.get("type")
             if action_type == "remove_columns":
                 chosen_columns = list(action["columns"])
@@ -1983,7 +2153,7 @@ def render_repair_control_center(
         key="talos-apply-selected-repairs",
         type="primary",
         on_click=queue_selected_repairs,
-        args=(tuple(selected_actions),),
+        args=(tuple(selected_actions), after_step),
         help="Only the repairs shown in this plan will reach the working copy.",
     )
 
@@ -2090,7 +2260,7 @@ def render_dataset_comparison(
     score_comparison = build_score_comparison_table(
         original_findings["score"], working_findings["score"]
     )
-    with st.expander("Detailed before / after comparison", expanded=False):
+    with st.expander("Detailed before / after comparison", expanded=details_expanded()):
         render_dataframe(comparison, width="stretch", hide_index=True)
         if not score_comparison.empty:
             render_dataframe(score_comparison, width="stretch", hide_index=True)
@@ -2168,7 +2338,7 @@ def render_dataset_comparison(
                     ),
                 }
             )
-        with st.expander("Signals remaining in the working copy", expanded=False):
+        with st.expander("Signals remaining in the working copy", expanded=details_expanded()):
             render_dataframe(pd.DataFrame(remaining_details), width="stretch", hide_index=True)
             st.caption(
                 "These are the results of reinspection. Some signals are contextual and may be intentionally left unchanged."
@@ -2204,16 +2374,15 @@ def render_reset_control(original_df: pd.DataFrame) -> None:
 
 
 def render_forge(
-    original_df: pd.DataFrame,
     working_df: pd.DataFrame,
-    original_findings: dict[str, dict[str, object]],
     working_findings: dict[str, dict[str, object]],
-    source_filename: str,
 ) -> None:
-    """Render suggestions, approvals, the ledger, comparison, and reset controls."""
-    st.markdown('<p class="talos-section-divider">02 · The Forge</p>', unsafe_allow_html=True)
+    """Render pre-clean proposals and the approval gate."""
+    st.markdown('<p class="talos-section-divider">03 · The Forge</p>', unsafe_allow_html=True)
     st.header("The Forge")
-    st.markdown("Findings become proposed repairs here. You decide what changes.")
+    st.markdown(
+        "Choose optional text, category, duplicate, or column tidy-ups. Numeric range decisions wait until the working copy has been reinspected."
+    )
     st.markdown(
         '<p class="talos-note">The source stays sealed. The Forge works only on a separate working copy.</p>',
         unsafe_allow_html=True,
@@ -2229,34 +2398,174 @@ def render_forge(
         )
     else:
         st.markdown("**No repairs are currently proposed for the working copy.**")
-    with st.expander(
-        f"Repair Control Center · {count_label(proposal_count, 'proposed repair')}",
-        expanded=False,
-    ):
-        st.caption(
-            "Choose the repairs that belong. TALOS will show the full plan before anything is committed."
-        )
-        render_repair_control_center(working_df, working_findings)
-
-    st.markdown(
-        '<p class="talos-section-divider">03 · Reinspection and change history</p>',
-        unsafe_allow_html=True,
+    st.caption(
+        "The source stays sealed. Review the Repair Plan and approve it before any change reaches the working copy."
     )
+    render_repair_control_center(
+        working_df, working_findings, include_outliers=False, after_step=3
+    )
+    st.divider()
+    if st.button(
+        "Skip pre-clean and continue to Range Watch",
+        key="talos-skip-preclean",
+        type="secondary",
+        use_container_width=True,
+        help="Keep the working copy as found and continue to full reinspection.",
+    ):
+        _advance_flow(3)
+        st.rerun()
+
+
+def render_first_watch(
+    profile: dict[str, object], findings: dict[str, dict[str, object]]
+) -> None:
+    """Present a compact baseline and route choice before detailed inspection."""
+    st.markdown('<p class="talos-section-divider">02 · First Watch</p>', unsafe_allow_html=True)
+    st.header("First Watch")
+    st.caption("A concise baseline from the preserved source. Detailed evidence follows the optional pre-clean stage.")
+    score = findings["score"].get("score")
+    metrics = st.columns(4)
+    metrics[0].metric("Rows", f"{int(profile['row_count']):,}")
+    metrics[1].metric("Columns", f"{int(profile['column_count']):,}")
+    metrics[2].metric("Dataset Integrity", "Not assessable" if score is None else f"{score} / 100")
+    metrics[3].metric("Source", str(profile["file_name"]))
+    if profile.get("sheet_name"):
+        st.caption(f"Selected worksheet: {profile['sheet_name']}")
+    render_guardian_summary(findings)
+    render_dataset_profile(profile, st.session_state["talos_original_df"])
+    route_buttons = st.columns(2)
+    if route_buttons[0].button(
+        "Review pre-clean options",
+        type="primary",
+        key="talos-firstwatch-to-forge",
+        use_container_width=True,
+    ):
+        _advance_flow(2)
+        st.rerun()
+    if route_buttons[1].button(
+        "Skip tidy-ups and inspect",
+        key="talos-firstwatch-skip-forge",
+        use_container_width=True,
+        help="Go directly to full inspection and numeric Range Watch.",
+    ):
+        _advance_flow(3)
+        st.rerun()
+
+
+def render_range_watch(
+    profile: dict[str, object],
+    working_df: pd.DataFrame,
+    original_findings: dict[str, dict[str, object]],
+    working_findings: dict[str, dict[str, object]],
+    source_filename: str,
+) -> None:
+    """Show fresh working-copy findings, charts, and approved numeric repair controls."""
+    st.markdown('<p class="talos-section-divider">04 · Reinspection & Range Watch</p>', unsafe_allow_html=True)
+    st.header("Reinspection & Range Watch")
+    st.caption("Every approved pre-clean action triggered a fresh inspection. These findings belong to the current working copy.")
+    current_profile = profile_dataset(
+        working_df,
+        file_name=source_filename,
+        file_size_bytes=int(st.session_state.get("talos_source_size_bytes", 0)),
+        sheet_name=profile.get("sheet_name"),
+    )
+    score = working_findings["score"].get("score")
+    score_columns = st.columns(4)
+    score_columns[0].metric("Working-copy rows", f"{len(working_df.index):,}")
+    score_columns[1].metric("Working-copy columns", f"{len(working_df.columns):,}")
+    score_columns[2].metric("Current integrity", "Not assessable" if score is None else f"{score} / 100")
+    score_columns[3].metric("Approved operations", f"{len(st.session_state['talos_transformation_ledger']):,}")
+    render_numeric_outliers(
+        working_findings["outliers"],
+        working_df,
+        source_filename,
+        expanded=(
+            bool(st.session_state["talos_expand_all_details"])
+            if "talos_expand_all_details" in st.session_state
+            else True
+        ),
+    )
+    render_dataset_profile(current_profile, working_df)
+    if st.session_state.get("talos_transformation_ledger"):
+        st.info("Source findings remain available in the comparison at Evidence Vault. The tables below describe the working copy only.")
+    render_missing_data(working_findings["missing"], source_filename)
+    render_duplicate_checks(working_findings["duplicates"], working_df, source_filename)
+    render_category_consistency(working_findings["categories"], source_filename)
+    render_structural_signals(working_findings["structure"], source_filename)
+
+    st.markdown('<p class="talos-section-kicker">Approved numeric actions</p>', unsafe_allow_html=True)
+    numeric_action = render_outlier_remediation(
+        working_df,
+        working_findings,
+        expanded=(
+            bool(st.session_state["talos_expand_all_details"])
+            if "talos_expand_all_details" in st.session_state
+            else True
+        ),
+    )
+    if numeric_action is not None:
+        try:
+            repair_plan = build_repair_plan(working_df, [numeric_action])
+        except (KeyError, TypeError, ValueError) as error:
+            st.error(f"TALOS could not prepare this Range Watch repair: {error}")
+        else:
+            st.subheader("Repair Plan")
+            st.markdown(
+                f"**Repair Plan:** {repair_plan['selected_count']} action · "
+                f"{repair_plan['estimated_values_changed']:,} values affected · "
+                f"{repair_plan['estimated_rows_removed']:,} rows removed"
+            )
+            st.caption(
+                f"Expected shape: {len(working_df.index):,} × {len(working_df.columns):,} "
+                f"→ {len(repair_plan['preview_df'].index):,} × {len(repair_plan['preview_df'].columns):,}. "
+                "Preview only: no change reaches the working copy until you approve the complete action."
+            )
+            st.button(
+                "Approve and apply Range Watch repairs",
+                key="talos-apply-range-watch-repairs",
+                type="primary",
+                on_click=queue_selected_repairs,
+                args=((numeric_action,), 3),
+                use_container_width=True,
+            )
+    else:
+        st.info("No numeric repair is selected. The source and working copy remain unchanged.")
+    st.divider()
+    if st.button(
+        "Continue to Evidence Vault",
+        key="talos-range-to-evidence",
+        type="secondary",
+        use_container_width=True,
+    ):
+        _advance_flow(4)
+        st.rerun()
+
+
+def render_evidence_stage(
+    original_df: pd.DataFrame,
+    working_df: pd.DataFrame,
+    profile: dict[str, object],
+    original_findings: dict[str, dict[str, object]],
+    working_findings: dict[str, dict[str, object]],
+    source_filename: str,
+) -> None:
+    """Collect the ledger, baseline comparison, reset and evidence downloads."""
+    st.markdown('<p class="talos-section-divider">05 · Evidence Vault</p>', unsafe_allow_html=True)
     ledger = st.session_state["talos_transformation_ledger"]
     render_transformation_ledger(ledger, source_filename)
-    original_summary = summarize_dataset(original_df, original_findings)
-    working_summary = summarize_dataset(working_df, working_findings)
     render_dataset_comparison(
         original_df,
         working_df,
-        original_summary,
-        working_summary,
+        summarize_dataset(original_df, original_findings),
+        summarize_dataset(working_df, working_findings),
         ledger,
         original_findings,
         working_findings,
         source_filename,
     )
     render_reset_control(original_df)
+    st.divider()
+    render_exports_and_report(profile, original_findings, working_findings)
 
 
 def load_emblem_svg() -> str:
@@ -2293,7 +2602,7 @@ def render_detailed_evidence_exports(
         "Detailed evidence exports · "
         f"{count_label(len(original_tables), 'original table')} · "
         f"{count_label(working_count, 'working-copy table')}",
-        expanded=False,
+        expanded=details_expanded(),
     ):
         st.caption(
             "Individual CSVs for the findings above. These files document signals; they do not change either dataset."
@@ -2395,6 +2704,19 @@ def render_exports_and_report(
     original_tables = st.session_state["talos_original_result_tables"]
     working_tables = st.session_state["talos_working_result_tables"]
     revision = int(st.session_state.get("talos_data_revision", 0))
+    is_excel = Path(str(original_profile["file_name"])).suffix.casefold() in {
+        ".xlsx", ".xlsm", ".xls"
+    }
+    cleaned_bytes = (
+        build_cleaned_excel(working_df, str(original_profile.get("sheet_name") or "TALOS Working Copy"))
+        if is_excel
+        else build_cleaned_csv(working_df)
+    )
+    cleaned_export_type = "cleaned_excel" if is_excel else "cleaned"
+    cleaned_filename = build_export_filename(
+        str(original_profile["file_name"]), cleaned_export_type
+    )
+    cleaned_pack_filename = "cleaned_dataset.xlsx" if is_excel else "cleaned_dataset.csv"
 
     st.markdown('<p class="talos-section-kicker">Evidence Release</p>', unsafe_allow_html=True)
     st.header("Evidence Vault")
@@ -2424,10 +2746,10 @@ def render_exports_and_report(
     downloads = st.columns(4)
     with downloads[0]:
         st.download_button(
-            "Download cleaned CSV",
-            data=build_cleaned_csv(working_df),
-            file_name=build_export_filename(str(original_profile["file_name"]), "cleaned"),
-            mime="text/csv",
+            "Download cleaned Excel" if is_excel else "Download cleaned CSV",
+            data=cleaned_bytes,
+            file_name=cleaned_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if is_excel else "text/csv",
             key="download-working-copy",
         )
     with downloads[1]:
@@ -2503,11 +2825,15 @@ def render_exports_and_report(
         with st.spinner("Sealing the evidence pack."):
             pack_files: dict[str, bytes] = {
                 "inspection_report.html": report_html.encode("utf-8"),
-                "cleaned_dataset.csv": build_cleaned_csv(working_df),
+                cleaned_pack_filename: cleaned_bytes,
             }
             descriptions = {
                 "inspection_report.html": "Complete, self-contained TALOS inspection dossier.",
-                "cleaned_dataset.csv": "The user-approved working copy, exported without a DataFrame index.",
+                cleaned_pack_filename: (
+                    f"The user-approved working copy in the selected worksheet {original_profile.get('sheet_name')!r}."
+                    if is_excel
+                    else "The user-approved working copy, exported without a DataFrame index."
+                ),
             }
             cached_pdf = st.session_state.get("talos_cached_report_pdf")
             if cached_pdf and st.session_state.get("talos_cached_report_pdf_revision") == revision:
@@ -2566,21 +2892,16 @@ def render_exports_and_report(
 
 
 def render_first_time_experience() -> None:
-    """Explain the normal TALOS workflow before a source file is provided."""
-    st.subheader("Present a source.")
+    """Show the single concise role and route explanation above intake."""
+    st.markdown('<p class="talos-section-kicker">Guardian protocol · data inspection</p>', unsafe_allow_html=True)
+    st.subheader("TALOS inspects first. You decide what changes.")
     st.markdown(
-        "TALOS inspects structure, consistency, and integrity before data moves downstream. "
-        "Signals are yours to interpret; repairs are yours to approve."
+        "TALOS inspects your source, guides you through optional repairs on a separate working copy, "
+        "checks the result again, then prepares the cleaned data and its audit trail. "
+        "**Your original stays unchanged.**"
     )
     st.markdown(
-        """
-        <div class="talos-workflow-cards">
-          <div class="talos-workflow-card"><strong>1 · Source</strong><span>Present a CSV. TALOS preserves the source throughout the session.</span></div>
-          <div class="talos-workflow-card"><strong>2 · Inspection</strong><span>Review structure, missingness, duplicates, categories, and numeric outliers.</span></div>
-          <div class="talos-workflow-card"><strong>3 · The Forge</strong><span>Choose proposed repairs, review the plan, then approve the changes.</span></div>
-          <div class="talos-workflow-card"><strong>4 · Evidence</strong><span>Export the working copy, evidence tables, dossier, and ZIP pack.</span></div>
-        </div>
-        """,
+        '<div class="talos-route-summary"><strong>THE ROUTE</strong><span>Present a source → First Watch → The Forge → Reinspection &amp; Range Watch → Evidence Vault</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -2602,25 +2923,47 @@ def main() -> None:
         st.session_state["talos_theme_preference"] = theme
     load_stylesheet(theme)
     render_header()
-    st.markdown('<p class="talos-section-kicker">Source</p>', unsafe_allow_html=True)
+    render_first_time_experience()
+    st.markdown('<p class="talos-section-divider">01 · Present a source</p>', unsafe_allow_html=True)
 
     uploaded_file = st.file_uploader(
-        "Present a CSV for inspection",
-        type=["csv"],
-        help="TALOS reads the file in memory for this session; it is not saved by the app.",
+        "Present a CSV or Excel file for inspection · up to 200 MB per file",
+        type=["csv", "xlsx", "xlsm", "xls"],
+        help="CSV and Excel files up to 200 MB are read in memory for this session; TALOS does not save the source file.",
     )
-    st.caption("Source files stay in this session. Avoid uploading confidential, sensitive, or personally identifiable information.")
+    st.caption("Accepted formats: CSV, XLSX, XLSM, and XLS · 200 MB per file. Source files stay in this session. Avoid uploading confidential, sensitive, or personally identifiable information.")
 
+    source_filename: str | None = None
+    file_contents: bytes | None = None
+    sheet_name: str | None = None
+    excel_sheets: list[str] | None = None
+    if uploaded_file is not None:
+        source_filename = uploaded_file.name
+        file_contents = uploaded_file.getvalue()
+        if Path(source_filename).suffix.casefold() in {".xlsx", ".xlsm", ".xls"}:
+            workbook_fingerprint = hashlib.sha256(
+                source_filename.encode("utf-8") + b"\0" + file_contents
+            ).hexdigest()
+            if st.session_state.get("talos_workbook_fingerprint") != workbook_fingerprint:
+                try:
+                    sheets = list_excel_sheets(file_contents)
+                except ValueError as error:
+                    st.error(str(error))
+                    render_step_navigation()
+                    return
+                st.session_state["talos_workbook_fingerprint"] = workbook_fingerprint
+                st.session_state["talos_workbook_sheets"] = sheets
+            excel_sheets = list(st.session_state.get("talos_workbook_sheets", []))
+            selected_sheet_key = "talos_selected_sheet"
+            if st.session_state.get(selected_sheet_key) not in excel_sheets:
+                st.session_state[selected_sheet_key] = excel_sheets[0] if excel_sheets else ""
+            sheet_name = st.selectbox(
+                "Choose a worksheet to inspect",
+                excel_sheets,
+                key=selected_sheet_key,
+                help="TALOS inspects one worksheet at a time. The selected worksheet is named in the source status and report.",
+            )
     demo_loaded = bool(st.session_state.get("talos_demo_loaded", False))
-    if uploaded_file is None and not demo_loaded:
-        clear_dataset_state()
-        if st.button("Load TALOS demo dataset", key="talos-load-demo", type="primary"):
-            st.session_state["talos_demo_loaded"] = True
-            st.rerun()
-        st.caption("No source at hand? Load the synthetic demo to explore the inspection workflow.")
-        render_first_time_experience()
-        return
-
     if uploaded_file is None and demo_loaded:
         if st.button("Clear demo dataset", key="talos-clear-demo", on_click=clear_demo_dataset_callback):
             return
@@ -2630,31 +2973,50 @@ def main() -> None:
         except OSError:
             logger.exception("The TALOS demo dataset was not available at %s", demo_path)
             st.error("The built-in TALOS demo dataset could not be loaded.")
+            render_step_navigation()
             return
         source_filename = "talos_demo.csv"
-    elif uploaded_file is not None:
-        st.session_state["talos_demo_loaded"] = False
-        file_contents = uploaded_file.getvalue()
-        source_filename = uploaded_file.name
-    else:
+
+    if uploaded_file is None and not demo_loaded:
         clear_dataset_state()
-        render_first_time_experience()
+        if st.button("Load Greek mythology demo", key="talos-load-demo", type="primary"):
+            st.session_state["talos_demo_loaded"] = True
+            st.rerun()
+        st.caption("Use the synthetic Greek mythology dataset to try the full guided flow.")
+        render_step_navigation()
+        return
+
+    if uploaded_file is not None:
+        st.session_state["talos_demo_loaded"] = False
+    if source_filename is None or file_contents is None:
+        render_step_navigation()
+        return
+
+    if len(file_contents) > 200 * 1024 * 1024:
+        st.error("This file exceeds TALOS's 200 MB per-file limit. Choose a smaller file.")
+        render_step_navigation()
         return
 
     if not file_contents:
         clear_dataset_state()
-        st.warning("The file is empty. Choose a CSV with a header and data.")
+        st.warning("The file is empty. Choose a CSV with a header and data, or an Excel workbook with a worksheet.")
         return
 
-    fingerprint_input = source_filename.encode("utf-8") + b"\0" + file_contents
+    fingerprint_input = source_filename.encode("utf-8") + b"\0" + (sheet_name or "").encode("utf-8") + b"\0" + file_contents
     file_fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
     if st.session_state.get("talos_file_fingerprint") != file_fingerprint:
         clear_dataset_state()
         try:
             with st.spinner("Source received. The watch begins."):
-                df = load_csv(file_contents)
+                if Path(source_filename).suffix.casefold() in {".xlsx", ".xlsm", ".xls"}:
+                    if sheet_name is None:
+                        st.warning("Choose a worksheet to continue.")
+                        return
+                    df = load_excel(file_contents, sheet_name)
+                else:
+                    df = load_csv(file_contents)
         except pd.errors.EmptyDataError:
-            st.warning("No readable header or data was found in this CSV.")
+            st.warning("No readable header or data was found in this source.")
             return
         except pd.errors.ParserError:
             st.error("The CSV structure could not be read consistently. Check its rows and separators.")
@@ -2662,22 +3024,25 @@ def main() -> None:
         except UnicodeDecodeError:
             st.error("The file encoding could not be read. Save the source as UTF-8 CSV and try again.")
             return
+        except ValueError as error:
+            st.error(str(error))
+            return
         except Exception:
-            logger.exception("Unexpected error while reading a source CSV.")
-            st.error("TALOS could not read this source. Confirm it is a valid CSV and try again.")
+            logger.exception("Unexpected error while reading a source file.")
+            st.error("TALOS could not read this source. Confirm it is a valid CSV or supported Excel workbook and try again.")
             return
 
         if len(df.columns) == 0:
-            st.warning("No usable columns were identified in this CSV.")
+            st.warning("No usable columns were identified in this source.")
             return
         has_named_column = any(
             str(column).strip() and not str(column).startswith("Unnamed:") for column in df.columns
         )
         if not has_named_column:
-            st.warning("No usable column names were identified in this CSV.")
+            st.warning("No usable column names were identified in this source.")
             return
         if len(df.index) == 0:
-            st.warning("This CSV has column headings but no data rows to inspect.")
+            st.warning("This source has column headings but no data rows to inspect.")
             return
 
         try:
@@ -2687,11 +3052,13 @@ def main() -> None:
                     st.session_state["talos_original_df"],
                     file_name=source_filename,
                     file_size_bytes=len(file_contents),
+                    sheet_name=sheet_name,
                 )
                 st.session_state["talos_original_profile"] = profile
+                st.session_state["talos_source_size_bytes"] = len(file_contents)
         except Exception:
             logger.exception("Unexpected error while profiling a source CSV.")
-            st.error("TALOS received the source but could not complete its inspection. Try another CSV.")
+            st.error("TALOS received the source but could not complete its inspection. Try another CSV or Excel file.")
             return
     else:
         profile = st.session_state["talos_original_profile"]
@@ -2717,26 +3084,40 @@ def main() -> None:
         render_operation_status("Inspection complete. The record is ready for review.")
 
     render_source_status(profile, original_df, demo_loaded)
-    render_integrity_score(original_findings["score"], source_filename)
-    render_guardian_summary(original_findings)
-    render_dataset_profile(profile, original_df)
+    render_step_navigation()
+    current_step = int(st.session_state.get("talos_flow_step", 1))
+    if current_step in {1, 2, 3, 4}:
+        render_detail_controls()
+    if current_step == 0:
+        st.markdown('<p class="talos-section-divider">01 · Present a source</p>', unsafe_allow_html=True)
+        st.subheader("Source received and preserved")
+        st.caption("The uploaded bytes remain in this session. TALOS created an independent working copy for any approved repair.")
+        if st.button("Continue to First Watch", key="talos-source-to-firstwatch", type="primary"):
+            _advance_flow(1)
+            st.rerun()
+    elif current_step == 1:
+        render_first_watch(profile, original_findings)
+    elif current_step == 2:
+        render_forge(working_df, working_findings)
+    elif current_step == 3:
+        render_range_watch(
+            profile,
+            working_df,
+            original_findings,
+            working_findings,
+            source_filename,
+        )
+    else:
+        render_evidence_stage(
+            original_df,
+            working_df,
+            profile,
+            original_findings,
+            working_findings,
+            source_filename,
+        )
     st.markdown(
-        '<p class="talos-section-divider">01 · Inspection findings</p>',
-        unsafe_allow_html=True,
-    )
-    render_missing_data(original_findings["missing"], source_filename)
-    render_duplicate_checks(original_findings["duplicates"], original_df, source_filename)
-    render_category_consistency(original_findings["categories"], source_filename)
-    render_numeric_outliers(original_findings["outliers"], original_df, source_filename)
-    render_structural_signals(original_findings["structure"], source_filename)
-    render_forge(original_df, working_df, original_findings, working_findings, source_filename)
-    st.markdown(
-        '<p class="talos-section-divider">04 · Evidence Vault</p>',
-        unsafe_allow_html=True,
-    )
-    render_exports_and_report(profile, original_findings, working_findings)
-    st.markdown(
-        '<p class="talos-footer">TALOS v1.1.2 · Source preserved · Repairs recorded · Nothing changed without approval</p>',
+        '<p class="talos-footer">TALOS v1.2.0 · Source preserved · Repairs recorded · Nothing changed without approval</p>',
         unsafe_allow_html=True,
     )
 

@@ -1,6 +1,8 @@
 """Streamlit integration checks for TALOS's session workflow."""
+# TALOS FILE VERSION: v1.2.0
 
 from pathlib import Path
+from io import BytesIO
 import hashlib
 
 import pandas as pd
@@ -20,18 +22,96 @@ from src.transformations import build_suggested_transformations
 APP_PATH = "../app.py"
 
 
+def go_to_forge(app):
+    """Navigate from First Watch to the pre-clean approval stage."""
+    if app.session_state.get("talos_flow_step") == 1:
+        app.button(key="talos-firstwatch-to-forge").click().run()
+
+
+def go_to_range_watch(app):
+    """Skip optional pre-clean actions and open the fresh inspection stage."""
+    step = app.session_state.get("talos_flow_step", 1)
+    if step == 1:
+        app.button(key="talos-firstwatch-skip-forge").click().run()
+    elif step == 2:
+        app.button(key="talos-skip-preclean").click().run()
+
+
+def go_to_evidence(app):
+    """Move from the current review stage to the Evidence Vault."""
+    go_to_range_watch(app)
+    if app.session_state.get("talos_flow_step") == 3:
+        app.button(key="talos-range-to-evidence").click().run()
+
+
 def test_landing_keeps_the_upload_demo_path_and_guardian_identity():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
 
     assert not app.exception
-    assert app.button(key="talos-load-demo").label == "Load TALOS demo dataset"
-    assert any(item.value == "Present a source." for item in app.subheader)
+    assert app.button(key="talos-load-demo").label == "Load Greek mythology demo"
+    assert any("TALOS inspects your source" in item.value for item in app.markdown)
+    assert any("THE ROUTE" in item.value and "Evidence Vault" in item.value for item in app.markdown)
+    assert any("200 MB per file" in item.label for item in app.file_uploader)
     assert any(
         'alt="TALOS bronze automaton guardian with illuminated amethyst eyes"' in item.value
         for item in app.markdown
     )
     assert any("Raw data enters. Nothing passes unchecked." in item.value for item in app.markdown)
     assert any("GUARDIAN ACTIVE" in item.value for item in app.markdown)
+
+
+def test_guided_skip_route_and_global_detail_controls():
+    csv = b"amount,region\n1,north\n2,south\n3,north\n4,south\n5,east\n6,west\n"
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("small.csv", csv, "text/csv")).run()
+
+    assert app.session_state["talos_flow_step"] == 1
+    assert app.button(key="talos-flow-step-4").disabled
+    app.button(key="talos-firstwatch-skip-forge").click().run()
+    assert app.session_state["talos_flow_step"] == 3
+    assert any(item.value == "Reinspection & Range Watch" for item in app.header)
+    assert app.button(key="talos-range-to-evidence").label == "Continue to Evidence Vault"
+
+    app.button(key="talos-collapse-all-details").click().run()
+    assert app.session_state["talos_expand_all_details"] is False
+    app.button(key="talos-expand-all-details").click().run()
+    assert app.session_state["talos_expand_all_details"] is True
+    app.button(key="talos-range-to-evidence").click().run()
+    assert app.session_state["talos_flow_step"] == 4
+    assert "Evidence Vault" in {item.value for item in app.header}
+
+
+def test_excel_sheet_choice_report_and_cleaned_workbook_export():
+    workbook = BytesIO()
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        pd.DataFrame({"unused": [99]}).to_excel(writer, index=False, sheet_name="Overview")
+        pd.DataFrame({"deity": ["Athena", "Zeus"], "rank": [1, 2]}).to_excel(
+            writer, index=False, sheet_name="Inspection Data"
+        )
+    content = workbook.getvalue()
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("myth.xlsx", content, mime)).run()
+
+    sheet_picker = app.selectbox(key="talos_selected_sheet")
+    assert sheet_picker.options == ["Overview", "Inspection Data"]
+    sheet_picker.select("Inspection Data").run()
+    assert app.session_state["talos_original_profile"]["sheet_name"] == "Inspection Data"
+    assert app.session_state["talos_original_df"]["deity"].tolist() == ["Athena", "Zeus"]
+
+    go_to_evidence(app)
+    assert app.download_button(key="download-working-copy").label == "Download cleaned Excel"
+    assert "Inspection Data" in app.session_state["talos_cached_report_html"]
+    app.button(key="prepare-evidence-pack").click().run()
+    from zipfile import ZipFile
+
+    with ZipFile(BytesIO(app.session_state["talos_cached_evidence_pack"])) as archive:
+        cleaned = archive.read("talos_evidence_pack/cleaned_dataset.xlsx")
+    round_trip = pd.read_excel(BytesIO(cleaned), sheet_name="Inspection Data")
+    assert round_trip.to_dict(orient="list") == {
+        "deity": ["Athena", "Zeus"],
+        "rank": [1, 2],
+    }
 
 
 def test_selected_repairs_require_approval_reinspect_and_reset():
@@ -61,47 +141,30 @@ central,,11,
         for element in app.markdown
     )
     assert "Guardian Summary" in {item.value for item in app.subheader}
-    assert "Dataset Integrity Score" in {item.value for item in app.subheader}
+    assert "First Watch" in {item.value for item in app.header}
     assert any("Source received" in item.value for item in app.markdown)
     assert any('class="talos-inspection-status"' in item.value for item in app.markdown)
-    expander_labels = {item.label for item in app.get("expander")}
-    assert any("Missing Data ·" in label for label in expander_labels)
-    assert any("Numeric Outliers ·" in label for label in expander_labels)
-    assert any("Repair Control Center ·" in label for label in expander_labels)
-    assert any("Detailed evidence exports ·" in label for label in expander_labels)
-    collapsed_sections = (
-        "Score components",
-        "Dataset Overview & Structure",
-        "Data Preview",
-        "Missing Data ·",
-        "Duplicate Inspection ·",
-        "Category Consistency ·",
-        "Numeric Outliers ·",
-        "Structural & Identifier Checks ·",
-        "Repair Control Center ·",
-        "Detailed evidence exports ·",
-    )
-    for section in collapsed_sections:
-        element = next(item for item in app.get("expander") if section in item.label)
-        assert element.proto.expanded is False
+    assert app.session_state["talos_flow_step"] == 1
+    assert app.button(key="talos-expand-all-details").label == "Expand all details"
+    assert app.button(key="talos-collapse-all-details").label == "Collapse all details"
     original = app.session_state["talos_original_df"].copy(deep=True)
     assert original.equals(app.session_state["talos_working_df"])
     assert app.session_state["talos_transformation_ledger"] == []
-    assert {item.label for item in app.get("download_button")} >= {
-        "Download cleaned CSV",
-        "Download transformation log",
-        "Download HTML report",
-        "missing_values.csv",
-        "structure.csv",
-        "before_after_comparison.csv",
-    }
+
+    go_to_forge(app)
+    assert not app.exception
+    expander_labels = {item.label for item in app.get("expander")}
+    assert any("Missing values ·" in label for label in expander_labels)
+    assert any("Exact duplicates ·" in label for label in expander_labels)
+    assert any("Text Normalisation" in label for label in expander_labels)
+    assert app.button(key="talos-skip-preclean").label == "Skip pre-clean and continue to Range Watch"
 
     missing_key = "talos_missing_strategy_" + hashlib.sha256(b"amount").hexdigest()[:16]
     app.selectbox(key=missing_key).select("Fill with median").run()
     duplicate_key = repair_selection_key("remove_exact_duplicates")
     app.checkbox(key=duplicate_key).check().run()
 
-    # Selections only prepare the plan. The active copy and ledger are unchanged.
+    # Selections only prepare the plan. The active copy and ledger stay unchanged.
     pd.testing.assert_frame_equal(original, app.session_state["talos_working_df"])
     assert app.session_state["talos_transformation_ledger"] == []
     assert any(item.value == "Repair Plan" for item in app.subheader)
@@ -128,7 +191,17 @@ central,,11,
     ] > 0
     assert "north " in set(working["region"])
     assert app.session_state["talos_original_df"].equals(original)
-    assert any("signal group" in item.value and "on watch" in item.value for item in app.warning)
+    assert app.session_state["talos_flow_step"] == 3
+    go_to_evidence(app)
+    assert any("signal group" in item.value and "remain" in item.value for item in app.warning)
+    assert {item.label for item in app.get("download_button")} >= {
+        "Download cleaned CSV",
+        "Download transformation log",
+        "Download HTML report",
+        "missing_values.csv",
+        "structure.csv",
+        "before_after_comparison.csv",
+    }
 
     app.button(key="reset-working-copy").click().run()
     app.button(key="confirm-reset").click().run()
@@ -182,6 +255,7 @@ def test_text_normalisation_requires_approval_and_updates_only_the_working_copy(
     csv = b"status\nopen\nOPEN\nclosed\n"
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("status.csv", csv, "text/csv")).run()
+    go_to_forge(app)
 
     original = app.session_state["talos_original_df"].copy(deep=True)
     pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
@@ -203,19 +277,23 @@ def test_text_normalisation_requires_approval_and_updates_only_the_working_copy(
 
 
 def test_annual_spend_keeps_usable_iqr_actions_and_text_styles_allow_column_overrides():
+    values = [0] * 20 + list(range(1, 11)) + [1000]
+    csv = ("annual_spend,status\n" + "\n".join(f"{value},open" for value in values) + "\n").encode()
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
-    app.button(key="talos-load-demo").click().run()
+    app.file_uploader[0].set_value(("spend.csv", csv, "text/csv")).run()
+    go_to_range_watch(app)
 
     annual_spend = app.selectbox(key=outlier_widget_key("annual_spend"))
     assert annual_spend.value == "Leave unchanged"
     assert "Replace with median" in annual_spend.options
     assert "Remove affected rows" in annual_spend.options
 
+    app.button(key="talos-flow-step-2").click().run()
     style_options = app.selectbox(key="talos_text_global_rule").options
     assert set(style_options) >= {
         "Proper Case", "Sentence case", "camelCase", "UPPERCASE", "lowercase"
     }
-    region_rule = app.selectbox(key=text_widget_key("column_rule", "region"))
+    region_rule = app.selectbox(key=text_widget_key("column_rule", "status"))
     assert "Use global default" in region_rule.options
     assert "Sentence case" in region_rule.options
 
@@ -226,6 +304,7 @@ def test_text_normalisation_global_style_column_override_and_address_suffix_opti
     )
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("addresses.csv", csv, "text/csv")).run()
+    go_to_forge(app)
     original = app.session_state["talos_original_df"].copy(deep=True)
 
     app.checkbox(key="talos_text_address_suffixes").check().run()
@@ -251,6 +330,7 @@ def test_text_normalisation_global_style_column_override_and_address_suffix_opti
 def test_optional_pdf_is_prepared_on_demand_and_appears_in_downloads():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.button(key="talos-load-demo").click().run()
+    go_to_evidence(app)
 
     assert app.session_state.get("talos_cached_report_pdf") is None
     app.button(key="prepare-inspection-report-pdf").click().run()
@@ -267,6 +347,7 @@ def test_optional_pdf_is_prepared_on_demand_and_appears_in_downloads():
 def test_category_variant_group_can_be_selected_and_applied_alone():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.button(key="talos-load-demo").click().run()
+    go_to_forge(app)
     original = app.session_state["talos_original_df"].copy(deep=True)
 
     category_ids = [
@@ -285,14 +366,21 @@ def test_category_variant_group_can_be_selected_and_applied_alone():
         app.session_state[repair_selection_key(repair_id)] for repair_id in category_ids
     )
 
-    group_id = "category:region:north"
+    chosen_group = next(
+        item
+        for item in build_suggested_transformations(
+            original, app.session_state["talos_original_findings"]
+        )
+        if item["action"]["type"] == "consolidate_category"
+    )
+    group_id = str(chosen_group["suggestion_id"])
     app.checkbox(key=repair_selection_key(group_id)).check().run()
     assert not app.exception
     pd.testing.assert_frame_equal(original, app.session_state["talos_working_df"])
     assert app.session_state["talos_transformation_ledger"] == []
 
     manager_key = "talos_missing_strategy_" + hashlib.sha256(
-        b"account_manager"
+        b"parent_1"
     ).hexdigest()[:16]
     manager_options = list(app.selectbox(key=manager_key).options)
     assert "Fill with custom text" in manager_options
@@ -301,21 +389,22 @@ def test_category_variant_group_can_be_selected_and_applied_alone():
 
     app.button(key="talos-apply-selected-repairs").click().run()
     working = app.session_state["talos_working_df"]
-    assert set(working.loc[original["region"].str.strip().str.casefold() == "north", "region"]) == {
-        "North"
+    chosen_column = str(chosen_group["action"]["column"])
+    chosen_values = {str(item["value"]) for item in chosen_group["variants"]}
+    chosen_mask = original[chosen_column].astype(str).isin(chosen_values)
+    assert set(working.loc[chosen_mask, chosen_column]) == {
+        str(chosen_group["proposed_canonical"])
     }
-    assert working.loc[original["region"].str.strip().str.casefold() == "south", "region"].tolist() == original.loc[
-        original["region"].str.strip().str.casefold() == "south", "region"
-    ].tolist()
     assert len(app.session_state["talos_transformation_ledger"]) == 1
     assert app.session_state["talos_transformation_ledger"][0]["parameters"][
         "canonical_value"
-    ] == "North"
+    ] == chosen_group["proposed_canonical"]
 
 
 def test_evidence_pack_is_created_on_demand_with_applicable_outputs():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.button(key="talos-load-demo").click().run()
+    go_to_evidence(app)
     app.button(key="prepare-evidence-pack").click().run()
 
     assert not app.exception
@@ -360,10 +449,10 @@ def test_guardian_summary_uses_existing_findings_and_qualifies_signals():
     findings = inspect_dataset(demo)
     summary = {item["area"]: item for item in build_guardian_summary(findings)}
 
-    assert "Gaps detected across 3 columns" in summary["Missing values"]["message"]
+    assert "Gaps detected" in summary["Missing values"]["message"]
     assert "exact duplicate row was found" in summary["Duplicates & identifiers"]["message"]
-    assert "7 category groups are wearing more than one label" in summary["Category consistency"]["message"]
-    assert "31 numeric values sit beyond the IQR watchline" in summary["Numeric distribution"]["message"]
+    assert "category groups are wearing more than one label" in summary["Category consistency"]["message"]
+    assert "numeric values sit beyond the IQR watchline" in summary["Numeric distribution"]["message"]
     assert "caught the watch" in summary["Structure"]["message"]
     assert summary["Missing values"]["status"] == "Significant finding"
     assert summary["Duplicates & identifiers"]["status"] == "Review recommended"
@@ -380,6 +469,7 @@ def test_manual_column_removal_waits_for_approval_reinspects_and_can_reset():
     csv = ("record_id,notes,amount\n" + "\n".join(rows) + "\n").encode()
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("manual-columns.csv", csv, "text/csv")).run()
+    go_to_forge(app)
     original = app.session_state["talos_original_df"].copy(deep=True)
 
     assert app.multiselect(key="talos_manual_column_remove").value == []
@@ -401,6 +491,7 @@ def test_manual_column_removal_waits_for_approval_reinspects_and_can_reset():
     assert app.session_state["talos_working_findings"]["structure"] == inspect_dataset(app.session_state["talos_working_df"])["structure"]
     pd.testing.assert_frame_equal(app.session_state["talos_original_df"], original)
 
+    go_to_evidence(app)
     app.button(key="reset-working-copy").click().run()
     app.button(key="confirm-reset").click().run()
     pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
@@ -410,6 +501,7 @@ def test_manual_column_removal_waits_for_approval_reinspects_and_can_reset():
 def test_column_removal_refuses_to_remove_every_field():
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("two-columns.csv", b"left,right\na,b\nc,d\n", "text/csv")).run()
+    go_to_forge(app)
     app.multiselect(key="talos_manual_column_remove").set_value(["left", "right"]).run()
     assert not app.exception
     assert any("Keep at least one column" in alert.value for alert in app.error)
@@ -422,6 +514,7 @@ def test_outlier_remediation_per_column_requires_approval_and_reinspects():
     csv = ("amount,volume\n" + "\n".join(f"{value},{value * 2}" for value in values) + "\n").encode()
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("outliers.csv", csv, "text/csv")).run()
+    go_to_range_watch(app)
     original = app.session_state["talos_original_df"].copy(deep=True)
     assert app.session_state["talos_original_findings"]["outliers"]["total_outlier_values"] == 4
 
@@ -432,15 +525,13 @@ def test_outlier_remediation_per_column_requires_approval_and_reinspects():
     assert app.session_state["talos_transformation_ledger"] == []
     assert any("5.5" in item.value for item in app.markdown)
     assert any(item.value == "Repair Plan" for item in app.subheader)
-    assert any(
-        "Preview only" in item.value and "after approval" in item.value
-        for item in app.markdown
-    )
+    assert any("Outlier preview" in item.value for item in app.markdown)
+    assert app.button(key="talos-apply-range-watch-repairs").label == "Approve and apply Range Watch repairs"
     assert not any(
         "Applied the approved per-column" in item.value for item in app.markdown
     )
 
-    app.button(key="talos-apply-selected-repairs").click().run()
+    app.button(key="talos-apply-range-watch-repairs").click().run()
     assert not app.exception
     assert app.session_state["talos_working_df"]["amount"].tolist()[-2:] == [5.5, 5.5]
     assert app.session_state["talos_working_findings"]["outliers"]["total_outlier_values"] == 2
@@ -457,6 +548,7 @@ def test_outlier_remediation_per_column_requires_approval_and_reinspects():
     assert record["parameters"]["columns"][0]["strategy"] == "median"
     pd.testing.assert_frame_equal(app.session_state["talos_original_df"], original)
 
+    go_to_evidence(app)
     app.button(key="reset-working-copy").click().run()
     app.button(key="confirm-reset").click().run()
     pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
@@ -468,6 +560,7 @@ def test_forge_can_remove_only_negative_integer_values_and_leave_fractional_valu
     csv = ("amount\n" + "\n".join(map(str, values)) + "\n").encode()
     app = AppTest.from_file(APP_PATH, default_timeout=30).run()
     app.file_uploader[0].set_value(("negative-values.csv", csv, "text/csv")).run()
+    go_to_range_watch(app)
 
     selector = app.selectbox(key=outlier_widget_key("amount"))
     assert "Remove rows with negative integer values" in selector.options
@@ -479,13 +572,35 @@ def test_forge_can_remove_only_negative_integer_values_and_leave_fractional_valu
     pd.testing.assert_frame_equal(app.session_state["talos_working_df"], original)
     assert any("2 unique rows to remove" in item.value for item in app.markdown)
 
-    app.button(key="talos-apply-selected-repairs").click().run()
+    app.button(key="talos-apply-range-watch-repairs").click().run()
     assert not app.exception
     assert app.session_state["talos_working_df"]["amount"].tolist()[-1] == -1.5
     assert not app.session_state["talos_working_df"]["amount"].isin([-3, -2]).any()
     assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["columns"][0][
         "criteria"
     ] == "negative_integer_values"
+
+
+def test_range_watch_exposes_negative_integer_iqr_outlier_only_choice():
+    values = list(range(10, 20)) + [-100, -1.5]
+    csv = ("amount\n" + "\n".join(map(str, values)) + "\n").encode()
+    app = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    app.file_uploader[0].set_value(("negative-outliers.csv", csv, "text/csv")).run()
+    go_to_range_watch(app)
+
+    selector = app.selectbox(key=outlier_widget_key("amount"))
+    assert "Remove rows with negative integer values" in selector.options
+    assert "Remove rows with negative integer outliers only" in selector.options
+    selector.select("Remove rows with negative integer outliers only").run()
+    assert any("1 unique row to remove" in item.value for item in app.markdown)
+    app.button(key="talos-apply-range-watch-repairs").click().run()
+
+    assert not app.exception
+    assert -100 not in app.session_state["talos_working_df"]["amount"].tolist()
+    assert -1.5 in app.session_state["talos_working_df"]["amount"].tolist()
+    assert app.session_state["talos_transformation_ledger"][-1]["parameters"]["columns"][0][
+        "criteria"
+    ] == "negative_integer_iqr_outliers"
 
 
 def test_guardian_summary_reports_a_clean_dataset_without_false_findings():

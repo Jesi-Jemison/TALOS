@@ -1,3 +1,4 @@
-"""Shared TALOS core; the Streamlit usability update release is v1.1.2."""
+"""TALOS FILE VERSION: v1.2.0. Shared inspection, scoring, and repair core."""
+# TALOS FILE VERSION: v1.2.0
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"

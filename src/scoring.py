@@ -1,4 +1,5 @@
 """Transparent, illustrative TALOS Dataset Integrity Score calculations."""
+# TALOS FILE VERSION: v1.2.0
 
 import pandas as pd
 
