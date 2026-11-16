@@ -47,6 +47,23 @@ def test_demo_inspection_and_approved_repair_are_stateless():
     assert csv_response.status_code == 200
     assert csv_response.data.startswith(b"\xef\xbb\xbf") or b"," in csv_response.data
 
+    for format_name, signature in (("html", b"<"), ("pdf", b"%PDF"), ("evidence", b"PK")):
+        result = client.post(f"/api/export/{format_name}", json=approved)
+        assert result.status_code == 200
+        assert result.data.startswith(signature)
+
+
+def test_text_normalisation_preview_and_apply():
+    client = app.test_client()
+    source = payload()
+    action = {"kind": "text", "columns": ["region"], "rule": "Proper Case", "trim_whitespace": True, "collapse_spaces": True}
+    preview = client.post("/api/preview", json={**source, "next": action})
+    assert preview.status_code == 200
+    assert preview.get_json()["affected_values"] > 0
+    changed = client.post("/api/apply", json={**source, "next": action})
+    assert changed.status_code == 200
+    assert changed.get_json()["ledger"]
+
 
 def test_rejects_oversized_and_invalid_data():
     client = app.test_client()
