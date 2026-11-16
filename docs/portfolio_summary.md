@@ -1,6 +1,7 @@
+<!-- TALOS FILE VERSION: v1.2.0 -->
 # TALOS portfolio summary
 
-**Project release: v1.1.2 · Streamlit readability, numeric remediation, and text normalisation.**
+**Project release: v1.2.0 · Guided inspection, CSV/Excel intake, and Range Watch.**
 
 ## One-line version
 

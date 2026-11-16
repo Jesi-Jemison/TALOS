@@ -1,3 +1,4 @@
+<!-- TALOS FILE VERSION: v1.2.0 -->
 # TALOS Dataset Integrity Score
 
 The Dataset Integrity Score is a **custom illustrative heuristic designed for TALOS**. It is not an industry standard, certification, or guarantee that a dataset is correct.

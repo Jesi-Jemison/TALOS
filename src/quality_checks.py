@@ -1,4 +1,5 @@
 """Read-only quality checks used by the TALOS inspection flow."""
+# TALOS FILE VERSION: v1.2.0
 
 import re
 from collections import Counter, defaultdict

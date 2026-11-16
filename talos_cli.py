@@ -1,4 +1,5 @@
 """Small standard-library command-line interface for TALOS inspections."""
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 

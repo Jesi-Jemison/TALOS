@@ -1,4 +1,5 @@
 """A guided TALOS workflow that is safe to run from the repository root."""
+# TALOS FILE VERSION: v1.2.0
 
 from __future__ import annotations
 

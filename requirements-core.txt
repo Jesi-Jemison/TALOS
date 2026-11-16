@@ -1,3 +1,4 @@
+# TALOS FILE VERSION: v1.2.0
 # Standalone TALOS Python and CLI workflows (no Streamlit dependency).
 pandas
 numpy

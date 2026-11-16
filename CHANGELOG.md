@@ -1,8 +1,37 @@
+<!-- TALOS FILE VERSION: v1.2.0 -->
 # TALOS change log
 
 Release numbers are kept in sequence with the code already published on
 `main`. `src.__version__` is the canonical machine-readable version; the README
 and this log state the current product release.
+
+## v1.2.0 — Guided inspection and CSV/Excel workflow
+
+This release expands the existing Streamlit product into a visible five-stage
+route while keeping analysis rules, the original source, and approved working
+copy separate.
+
+- Moved TALOS's role and workflow route above file intake. Added step status and
+  navigation, First Watch and skip paths, Range Watch, Evidence Vault, and
+  global expand/collapse controls for supporting details.
+- Added CSV, XLSX, XLSM, and XLS intake with one selected worksheet and the
+  existing 200 MB per-file limit. Excel reports name the worksheet; cleaned
+  Excel downloads and evidence packs retain that worksheet name.
+- Kept pre-clean selection and the full Repair Plan in The Forge. Every
+  approved batch reinspects the working copy before Range Watch. IQR charts
+  distinguish flagged values and bounds, with complete tabular evidence and
+  per-column approval controls, including both negative-integer modes.
+- Replaced the demo with 50 synthetic teaching records covering selected
+  Greek deities and documented source variants. Added deliberate category,
+  missingness, duplicate, empty/constant-field, and clearly demo-only numeric
+  signals; source notes document the ancient-text references.
+- Kept PDF summaries aggregate-focused and prevented HTML reports from
+  listing individual text override values. Reports summarize only style
+  overrides that differ from the global default; detailed evidence remains in
+  the existing downloads.
+- Expanded local setup instructions, aligned release metadata, and added a
+  path-by-path format-safe version-comment audit. Existing images remain labeled
+  v1.1.2 references because the local preview browser blocked localhost access.
 
 ## v1.1.2 — Streamlit readability, numeric remediation, and text normalisation
 

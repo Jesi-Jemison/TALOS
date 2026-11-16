@@ -1,3 +1,4 @@
+# TALOS FILE VERSION: v1.2.0
 from io import BytesIO
 from zipfile import ZipFile
 
