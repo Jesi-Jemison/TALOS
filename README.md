@@ -2,7 +2,7 @@
 
 **Raw data enters. Nothing passes unchecked.**
 
-**Current release: v1.1.2 — Streamlit readability, Forge controls, and text normalisation.**
+**Current release: v1.1.2 - Streamlit readability, Forge controls, and text normalisation.**
 
 This patch follows v1.1.1 and continues the published version sequence.
 
