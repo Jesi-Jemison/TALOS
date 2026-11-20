@@ -70,7 +70,7 @@ function metric(value, label) {
   const item = document.createElement('div');
   item.className = 'metric';
   const strong = document.createElement('strong');
-  strong.textContent = value == null ? '—' : String(value);
+  strong.textContent = value == null ? '-' : String(value);
   const span = document.createElement('span');
   span.textContent = label;
   item.append(strong, span);
@@ -87,7 +87,7 @@ function renderTable(target, rows) {
   columns.forEach(column => {const th=document.createElement('th');th.textContent=column;hr.append(th);});
   head.append(hr);
   const body = document.createElement('tbody');
-  rows.forEach(row => {const tr=document.createElement('tr');columns.forEach(column => {const td=document.createElement('td');const value=row[column];td.textContent=value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value);tr.append(td);});body.append(tr);});
+  rows.forEach(row => {const tr=document.createElement('tr');columns.forEach(column => {const td=document.createElement('td');const value=row[column];td.textContent=value == null ? '-' : typeof value === 'object' ? JSON.stringify(value) : String(value);tr.append(td);});body.append(tr);});
   table.append(head, body);
   if (target !== table) target.append(table);
 }
@@ -145,7 +145,7 @@ function render() {
   const snapshot = ui.snapshot;
   for (const id of ['workspace','forge','evidence']) $(id).hidden = false;
   $('fileMeta').textContent = `${ui.filename} · ${snapshot.summary.row_count.toLocaleString()} rows · ${snapshot.summary.column_count} columns`;
-  $('score').textContent = snapshot.summary.score ?? '—';
+  $('score').textContent = snapshot.summary.score ?? '-';
   const metrics = $('metrics');metrics.replaceChildren();
   [
     [snapshot.summary.missing_cells,'Missing cells'],
