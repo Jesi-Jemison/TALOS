@@ -198,7 +198,7 @@ def build_export_filename(original_filename: str, export_type: str) -> str:
 def build_cleaned_csv(df: pd.DataFrame) -> bytes:
     """Serialize a working copy as UTF-8 CSV without an index column."""
     buffer = StringIO()
-    df.to_csv(buffer, index=False)
+    df.to_csv(buffer, index=False, lineterminator="\n")
     return buffer.getvalue().encode("utf-8")
 
 
