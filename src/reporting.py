@@ -777,7 +777,7 @@ def build_inspection_report_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TALOS Inspection Dossier — {_escape(profile['file_name'])}</title>
+  <title>TALOS Inspection Dossier - {_escape(profile['file_name'])}</title>
   <style>{REPORT_STYLESHEET}</style>
 </head>
 <body><main class="page">
@@ -814,7 +814,7 @@ def build_inspection_report_html(
   {working_row_evidence}
   <section>
     <h2>Before / After the Forge</h2>
-    <p>Fewer signals mean fewer findings under TALOS's rules — not automatic proof of better data.</p>
+    <p>Fewer signals mean fewer findings under TALOS's rules - not automatic proof of better data.</p>
     {comparison_table}
   </section>
   <section><h2>Transformation Ledger</h2>{ledger_section}</section>
@@ -875,7 +875,7 @@ def build_inspection_report_pdf(
         rightMargin=right_margin,
         topMargin=0,
         bottomMargin=bottom_margin,
-        title=f"TALOS Inspection Dossier — {profile.get('file_name', 'dataset.csv')}",
+        title=f"TALOS Inspection Dossier - {profile.get('file_name', 'dataset.csv')}",
         author="TALOS",
         pageCompression=1,
     )

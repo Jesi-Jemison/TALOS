@@ -9,6 +9,14 @@ This release follows v1.1.2 and builds on the existing Streamlit product.
 
 [Open the live Streamlit app](https://talos-app.streamlit.app/) · [View the source](https://github.com/Jesi-Jemison/TALOS)
 
+## Vercel web version
+
+The `web/` directory contains a Flask interface for Vercel. It reuses the TALOS inspection, scoring, transformation, and reporting engine, while the current Streamlit app remains available. Import this GitHub repository into Vercel with **Root Directory: `web`** and **Framework Preset: Flask**. No environment variables or build command are required. Connect `talos.jesicat.online` only after checking the Vercel preview.
+
+The Vercel interface accepts CSV files up to 2 MB. Each request sends the source CSV to a Vercel Function, which reconstructs the original and approved working-copy changes in memory; no server-side dataset storage is configured. The 2 MB cap leaves room under [Vercel's 4.5 MB Function payload limit](https://vercel.com/docs/functions/limitations) for JSON encoding and action history. Larger files can still use the Streamlit app. For now, keep the Streamlit deployment running while the Vercel interface is reviewed.
+
+When core files in `src/` change, copy the corresponding modules into `web/src/` and run the web checks. The Vercel package is self-contained because the Vercel project root is `web/`.
+
 Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 TALOS is a Greek-mythology-inspired data inspection application. It guides a person through CSV or Excel intake, a first inspection, optional approved repairs on a separate working copy, a fresh Range Watch, and an auditable export. The source stays untouched.

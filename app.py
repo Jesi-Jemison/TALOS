@@ -288,7 +288,7 @@ def build_guardian_summary(
     if affected_columns:
         missing_line = (
             f"Gaps detected across {affected_columns:,} "
-            f"{'column' if affected_columns == 1 else 'columns'} — "
+            f"{'column' if affected_columns == 1 else 'columns'} - "
             f"{missing_percentage:.1f}% of all cells."
         )
         severity_counts = missing["severity_counts"]
@@ -1932,7 +1932,7 @@ def render_repair_control_center(
                             f"Proposed repair: fill {count_label(missing_count, 'gap')} {method}."
                         )
                 else:
-                    st.caption("No action selected — this field stays as found.")
+                    st.caption("No action selected - this field stays as found.")
 
     with st.expander(f"Exact duplicates · {len(duplicates)} proposed", expanded=details_expanded()):
         if not duplicates:
@@ -2176,7 +2176,7 @@ def render_transformation_ledger(
     rows = [
         {
             "Transformation": item["transformation_type"],
-            "Column": item["column"] or "—",
+            "Column": item["column"] or "-",
             "Affected rows": item["affected_rows"],
             "Description": item["description"],
             "Rows": f"{item['rows_before']} → {item['rows_after']}",
@@ -2227,8 +2227,8 @@ def render_dataset_comparison(
     for container, (label, key) in zip(columns, labels):
         before = original_summary[key]
         after = working_summary[key]
-        before_text = "—" if before is None else str(before)
-        after_text = "—" if after is None else str(after)
+        before_text = "-" if before is None else str(before)
+        after_text = "-" if after is None else str(after)
         container.metric(
             label,
             after_text,
@@ -2251,7 +2251,7 @@ def render_dataset_comparison(
         help="A higher score means fewer signals under TALOS's current rules; it does not prove the data is correct.",
     )
     st.caption(
-        "Fewer signals mean fewer findings under TALOS's rules — not automatic proof of better data."
+        "Fewer signals mean fewer findings under TALOS's rules - not automatic proof of better data."
     )
 
     comparison = build_comparison_table(

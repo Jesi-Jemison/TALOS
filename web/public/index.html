@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#110d24">
+  <title>TALOS · Dataset integrity</title>
+  <meta name="description" content="Inspect a CSV, preview repairs, and export a documented working copy with TALOS.">
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/main.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">TALOS<span>DATASET GUARDIAN</span></a><nav><a href="#workspace">Workspace</a><a href="#forge">The Forge</a><a href="#evidence">Evidence Vault</a><a href="https://github.com/Jesi-Jemison/TALOS" target="_blank" rel="noopener">Source ↗</a></nav></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">RAW DATA ENTERS. NOTHING PASSES UNCHECKED.</p>
+      <h1>Meet your dataset<br><em>before you change it.</em></h1>
+      <p>TALOS checks a CSV for missing values, duplicates, category variants, outliers, and structure. Choose each repair, inspect its preview, then apply it to a separate working copy.</p>
+      <div class="hero-actions"><label class="button primary" for="fileInput">Choose a CSV <span>↗</span></label><input id="fileInput" type="file" accept=".csv,text/csv" hidden><button id="demoButton" class="button secondary">Try the synthetic demo</button></div>
+      <p class="small">This Vercel version processes CSVs up to 2 MB. Your file is sent to the TALOS function for each action; it is kept in this tab and is not saved on the server. For larger datasets, use the <a href="https://talos-app.streamlit.app/">Streamlit app ↗</a>.</p>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="workspace" class="panel" hidden>
+      <div class="panel-head"><div><p class="eyebrow">01 / INSPECT</p><h2>What did TALOS find?</h2><p id="fileMeta" class="muted"></p></div><button id="resetButton" class="text-button">Clear this dataset</button></div>
+      <div class="score-wrap"><div class="score"><strong id="score">-</strong><span>INTEGRITY SCORE</span></div><p>This is a TALOS heuristic, not a claim that the data is correct. Check each signal against the meaning of your fields.</p></div>
+      <div id="metrics" class="metrics"></div>
+      <div class="split"><div><h3>Working-copy preview</h3><div class="table-wrap"><table id="sampleTable"></table></div></div><div><h3>Signals to review</h3><div id="signals" class="signals"></div></div></div>
+    </section>
+    <section id="forge" class="panel" hidden>
+      <div class="panel-head"><div><p class="eyebrow">02 / SELECT · PREVIEW · APPROVE</p><h2>The Forge</h2><p>Suggestions are invitations to investigate. Nothing changes until you approve a preview.</p></div><span id="changeCount" class="pill">0 approved changes</span></div>
+      <h3>Suggested actions</h3><div id="suggestions" class="suggestions"></div>
+      <details class="manual"><summary>Choose another repair <span>＋</span></summary>
+        <div class="manual-grid"><label>Action<select id="actionType"><option value="remove_exact_duplicates">Remove exact duplicates</option><option value="normalize_whitespace">Clean category whitespace</option><option value="remove_rows_with_missing">Remove rows with missing values</option><option value="fill_numeric_missing">Fill missing numeric values</option><option value="fill_text_missing">Fill missing text values</option><option value="remove_columns">Remove a column</option><option value="outlier">Respond to numeric outliers</option><option value="text">Normalise text</option></select></label><label id="columnWrap">Column<select id="columnSelect"></select></label><label id="methodWrap" hidden>Method<select id="methodSelect"></select></label><label id="valueWrap" hidden>Custom value<input id="customValue" type="text"></label><label id="textRuleWrap" hidden>Text style<select id="textRule"><option>Leave unchanged</option><option>Proper Case</option><option>Sentence case</option><option>lowercase</option><option>UPPERCASE</option><option>camelCase</option><option>snake_case</option></select></label></div>
+        <label id="trimWrap" class="check" hidden><input id="trimText" type="checkbox"> Trim outer whitespace and collapse repeated spaces</label>
+        <button id="manualPreview" class="button secondary">Preview this repair →</button>
+      </details>
+      <div id="preview" class="preview" hidden><p class="eyebrow">REVIEW BEFORE APPLYING</p><h3 id="previewTitle"></h3><div id="previewStats" class="metrics compact"></div><ul id="previewWarnings"></ul><div id="previewExamples" class="table-wrap"></div><div class="actions"><button id="applyButton" class="button primary">Approve and apply</button><button id="cancelPreview" class="button ghost">Cancel</button></div></div>
+    </section>
+    <section id="evidence" class="panel" hidden><div class="panel-head"><div><p class="eyebrow">03 / EXPORT · DOCUMENT</p><h2>Evidence Vault</h2><p>Take the working copy, report, or evidence pack with you.</p></div></div><div class="downloads"><button data-export="csv">Cleaned CSV ↓</button><button data-export="html">HTML report ↓</button><button data-export="pdf">PDF report ↓</button><button data-export="evidence">Evidence pack ZIP ↓</button><button data-export="log">Transformation log ↓</button></div><h3>Approved changes</h3><ol id="ledger" class="ledger"></ol></section>
+  </main>
+  <footer>TALOS keeps the original dataset intact. Every repair is a deliberate change to a working copy. <a href="https://talos-app.streamlit.app/">Original Streamlit app ↗</a></footer>
+</body>
+</html>
