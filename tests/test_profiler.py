@@ -1,11 +1,15 @@
-"""Small tests for TALOS CSV intake and dataset profiling."""
+"""Tests for TALOS CSV and Excel intake and dataset profiling."""
+# TALOS FILE VERSION: v1.2.0
 
+from io import BytesIO
 import pandas as pd
 import pytest
 
 from src.profiler import (
     format_file_size,
     identify_column_types,
+    list_excel_sheets,
+    load_excel,
     load_csv,
     profile_dataset,
 )
@@ -120,3 +124,35 @@ def test_latin_1_csv_uses_encoding_fallback():
     df = load_csv("name\nCafé\n".encode("latin-1"))
 
     assert df.loc[0, "name"] == "Café"
+
+
+def test_excel_intake_lists_and_reads_the_selected_sheet_in_memory():
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame({"ignore": [99]}).to_excel(writer, index=False, sheet_name="Overview")
+        pd.DataFrame({"city": ["Athens", "Delphi"], "count": [2, 3]}).to_excel(
+            writer, index=False, sheet_name="Inspection Data"
+        )
+    contents = buffer.getvalue()
+
+    assert list_excel_sheets(contents) == ["Overview", "Inspection Data"]
+    selected = load_excel(contents, "Inspection Data")
+    assert selected.to_dict(orient="list") == {
+        "city": ["Athens", "Delphi"],
+        "count": [2, 3],
+    }
+    assert profile_dataset(selected, "myth.xlsx", len(contents), "Inspection Data")[
+        "sheet_name"
+    ] == "Inspection Data"
+
+
+def test_empty_malformed_and_unknown_excel_inputs_have_readable_errors():
+    with pytest.raises(ValueError, match="empty"):
+        list_excel_sheets(b"")
+    with pytest.raises(ValueError, match="could not open"):
+        list_excel_sheets(b"not an excel workbook")
+
+    buffer = BytesIO()
+    pd.DataFrame({"name": ["Zeus"]}).to_excel(buffer, index=False, sheet_name="Gods")
+    with pytest.raises(ValueError, match="not in this workbook"):
+        load_excel(buffer.getvalue(), "Titans")

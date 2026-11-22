@@ -1,3 +1,4 @@
+<!-- TALOS FILE VERSION: v1.2.0 -->
 # Use TALOS from VS Code, Python, or a notebook
 
 TALOS has one Python core shared by the Streamlit app, scripts, notebooks, and

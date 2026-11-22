@@ -1,3 +1,4 @@
+<!-- TALOS FILE VERSION: v1.2.0 -->
 # TALOS local performance check
 
 These timings are local measurements, not a promise about Streamlit Community Cloud or another machine. They exclude network transfer, browser rendering, and the time a person spends reviewing a repair plan.

@@ -1,4 +1,5 @@
-/* TALOS v1.1.2 interface tokens and theme-aware component styling. */
+/* TALOS FILE VERSION: v1.2.0 */
+/* TALOS guided-flow interface tokens and theme-aware component styling. */
 :root {
     color-scheme: dark;
     --talos-bg: #09080C;
@@ -188,6 +189,58 @@ body, .stApp {
 }
 
 .talos-section-kicker { margin: 1.25rem 0 0.15rem; }
+
+.talos-route-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem 1rem;
+    padding: 0.85rem 1rem;
+    margin: 0.65rem 0 1.1rem;
+    border: 1px solid var(--talos-line);
+    border-left: 3px solid var(--talos-bronze-strong);
+    border-radius: 9px;
+    background: var(--talos-panel);
+    color: var(--talos-text);
+}
+
+.talos-route-summary strong {
+    color: var(--talos-bronze-strong);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+}
+
+.talos-route-summary span { line-height: 1.5; }
+
+div[class*="st-key-talos-flow-step-"] button {
+    min-height: 3.6rem;
+    border: 1px solid var(--talos-line);
+    border-radius: 9px;
+    color: var(--talos-text);
+    white-space: normal;
+    line-height: 1.25;
+}
+
+div[class*="st-key-talos-flow-step-"] button:disabled {
+    opacity: 1;
+    color: var(--talos-muted);
+}
+
+div[class*="st-key-talos-flow-step-"] button:focus-visible,
+button:focus-visible,
+input:focus-visible,
+[role="combobox"]:focus-visible {
+    outline: 3px solid var(--talos-bronze-strong) !important;
+    outline-offset: 2px !important;
+}
+
+[data-testid="stAltairChart"] { border-radius: 8px; }
+
+@media (max-width: 720px) {
+    .talos-route-summary { align-items: flex-start; }
+    .talos-route-summary span { font-size: 0.9rem; }
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+}
 
 .talos-section-divider {
     display: flex;

@@ -1,3 +1,7 @@
+[server]
+# TALOS FILE VERSION: v1.2.0
+maxUploadSize = 200
+
 [theme]
 base = "dark"
 primaryColor = "#C39A5A"
